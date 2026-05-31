@@ -1,6 +1,3 @@
-# Copyright 2026 DreamWorks Animation LLC
-# SPDX-License-Identifier: Apache-2.0
-
 """Validate MoonRay VOP network masks in Houdini.
 
 Run with Houdini's hython after sourcing the OpenMoonRay Houdini setup:

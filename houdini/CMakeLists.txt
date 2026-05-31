@@ -14,6 +14,7 @@ install(FILES
 install(DIRECTORY
         otls
         soho
+        toolbar
         python2.7libs
         python3.9libs
         python3.11libs

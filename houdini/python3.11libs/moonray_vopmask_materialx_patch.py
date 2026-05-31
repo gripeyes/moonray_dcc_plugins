@@ -1,6 +1,3 @@
-# Copyright 2026 DreamWorks Animation LLC
-# SPDX-License-Identifier: Apache-2.0
-
 """Add MaterialX to source DW_MOONRAY VOP HDA masks.
 
 This is a source-definition maintenance helper. Run it with Houdini's hython
