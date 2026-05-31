@@ -653,7 +653,7 @@
             name    "xn__primvarsmoonraymesh_resolution_zpbh"
             label   "Mesh Resolution"
             type    float
-            default { "2" }
+            default { "2.0" }
             help    "Maximum resolution for mesh tessellation. With adaptive tessellation this caps the tessellation level."
             disablewhen "{ xn__primvarsmoonraymesh_resolution_control_02bh == block } { xn__primvarsmoonraymesh_resolution_control_02bh == none }"
             range   { 0 10 }
@@ -679,7 +679,7 @@
             name    "xn__primvarsmoonrayadaptive_error_dobh"
             label   "Adaptive Error"
             type    float
-            default { "0" }
+            default { "0.0" }
             help    "Maximum allowable pixel error for adaptive subdivision tessellation. A value of 0 disables adaptive tessellation."
             disablewhen "{ xn__primvarsmoonrayadaptive_error_control_e1bh == block } { xn__primvarsmoonrayadaptive_error_control_e1bh == none }"
             range   { 0 10 }
