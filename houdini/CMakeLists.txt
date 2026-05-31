@@ -15,6 +15,7 @@ install(DIRECTORY
         otls
         soho
         python2.7libs
+        python3.9libs
         python3.11libs
     DESTINATION
         plugin/houdini
