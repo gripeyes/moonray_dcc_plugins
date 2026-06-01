@@ -7,7 +7,7 @@
         label   "moonray:class"
         type    string
         invisible
-        default { "set" }
+        default { "none" }
         menujoin {
             "set"           "Set Or Create"
             "setexisting"   "Set if Exists"
@@ -20,7 +20,7 @@
         label   "class"
         type    string
         invisible
-        default { [ "\n        parm = hou.parm(\"lighttype\")\n        if parm:\n            value = parm.eval()\n            label = parm.menuLabels()[value]\n            if label == \"Geometry\":\n                label = \"Mesh\"\n            elif label == \"Rectangle\":\n                label = \"Rect\"\n            return label + \"Light\"\n        else:\n            parm = hou.parm(\"primtype\")\n            value = parm.eval()\n            if value in (\"UsdLuxDomeLight\", \"UsdLuxDomeLight_1\", \"DomeLight_1\"):\n                return \"EnvLight\"\n        " python ] }
+        default { [ "\n        parm = hou.parm(\"lighttype\")\n        if parm:\n            value = parm.eval()\n            label = parm.menuLabels()[value]\n            if label == \"Geometry\":\n                label = \"Mesh\"\n            elif label == \"Point\":\n                label = \"Sphere\"\n            elif label == \"Rectangle\":\n                label = \"Rect\"\n            return label + \"Light\"\n        else:\n            parm = hou.parm(\"primtype\")\n            value = parm.eval()\n            if value in (\"UsdLuxDomeLight\", \"UsdLuxDomeLight_1\", \"DomeLight_1\"):\n                return \"EnvLight\"\n        " python ] }
         disablewhen "{ xn__moonrayclass_control_o8a == block } { xn__moonrayclass_control_o8a == none }"
         parmtag { "usdvaluetype" "token" }
     }
