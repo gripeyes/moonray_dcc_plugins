@@ -1230,14 +1230,14 @@
     group {
         name    "folder4"
         label   "Cone"
-        hidewhen "{ primtype != UsdLuxDiskLight createprims == on }"
+        hidewhen "{ spotlightenable == 0 xn__moonrayclass_nva != SpotLight } { primtype != UsdLuxSphereLight primtype != UsdLuxDiskLight xn__moonrayclass_nva != SpotLight }"
 
         parm {
             name    "xn__moonraylens_radius_control_gjb"
             label   "moonray:lens_radius"
             type    string
             default { "none" }
-            hidewhen "{ primtype != UsdLuxDiskLight createprims == on }"
+            hidewhen "{ spotlightenable == 0 xn__moonrayclass_nva != SpotLight } { primtype != UsdLuxSphereLight primtype != UsdLuxDiskLight xn__moonrayclass_nva != SpotLight }"
             menujoin {
                 "set"           "Set Or Create"
                 "setexisting"   "Set if Exists"
@@ -1250,9 +1250,9 @@
             label   "Lens Radius"
             type    float
             default { "1" }
-            help    "The radius of the SpotLight's lens (when the aspect ratio is 1.0, so that the lens is circular)."
+            help    "The radius of the SpotLight's lens. This is a MoonRay SpotLight override; standard USD cone angle and softness still drive the cone shape."
             disablewhen "{ xn__moonraylens_radius_control_gjb == block } { xn__moonraylens_radius_control_gjb == none }"
-            hidewhen "{ primtype != UsdLuxDiskLight createprims == on }"
+            hidewhen "{ spotlightenable == 0 xn__moonrayclass_nva != SpotLight } { primtype != UsdLuxSphereLight primtype != UsdLuxDiskLight xn__moonrayclass_nva != SpotLight }"
             range   { 0 10 }
             parmtag { "usdvaluetype" "float" }
         }
@@ -1261,7 +1261,7 @@
             label   "moonray:aspect_ratio"
             type    string
             default { "none" }
-            hidewhen "{ primtype != UsdLuxDiskLight createprims == on }"
+            hidewhen "{ spotlightenable == 0 xn__moonrayclass_nva != SpotLight } { primtype != UsdLuxSphereLight primtype != UsdLuxDiskLight xn__moonrayclass_nva != SpotLight }"
             menujoin {
                 "set"           "Set Or Create"
                 "setexisting"   "Set if Exists"
@@ -1276,7 +1276,7 @@
             default { "1" }
             help    "The aspect ratio of the lens - its local y dimension divided by its local x dimension. Values other than 1.0 will give the lens a non-circular elliptical shape."
             disablewhen "{ xn__moonrayaspect_ratio_control_2kb == block } { xn__moonrayaspect_ratio_control_2kb == none }"
-            hidewhen "{ primtype != UsdLuxDiskLight createprims == on }"
+            hidewhen "{ spotlightenable == 0 xn__moonrayclass_nva != SpotLight } { primtype != UsdLuxSphereLight primtype != UsdLuxDiskLight xn__moonrayclass_nva != SpotLight }"
             range   { 0 10 }
             parmtag { "usdvaluetype" "float" }
         }
@@ -1285,7 +1285,7 @@
             label   "moonray:focal_plane_distance"
             type    string
             default { "none" }
-            hidewhen "{ primtype != UsdLuxDiskLight createprims == on }"
+            hidewhen "{ spotlightenable == 0 xn__moonrayclass_nva != SpotLight } { primtype != UsdLuxSphereLight primtype != UsdLuxDiskLight xn__moonrayclass_nva != SpotLight }"
             menujoin {
                 "set"           "Set Or Create"
                 "setexisting"   "Set if Exists"
@@ -1300,7 +1300,7 @@
             default { "1e+10" }
             help    "The distance from the SpotLight's position, measured in the direction the light is pointing, at which the projected image will be in focus."
             disablewhen "{ xn__moonrayfocal_plane_distance_control_3xb == block } { xn__moonrayfocal_plane_distance_control_3xb == none }"
-            hidewhen "{ primtype != UsdLuxDiskLight createprims == on }"
+            hidewhen "{ spotlightenable == 0 xn__moonrayclass_nva != SpotLight } { primtype != UsdLuxSphereLight primtype != UsdLuxDiskLight xn__moonrayclass_nva != SpotLight }"
             range   { 0 10 }
             parmtag { "usdvaluetype" "float" }
         }
@@ -1308,6 +1308,7 @@
             name    "xn__moonrayouter_cone_angle_control_lrb"
             label   "moonray:outer_cone_angle"
             type    string
+            invisible
             default { "none" }
             hidewhen "{ primtype != UsdLuxDiskLight createprims == on }"
             menujoin {
@@ -1321,6 +1322,7 @@
             name    "xn__moonrayouter_cone_angle_keb"
             label   "Outer Cone Angle"
             type    float
+            invisible
             default { "60" }
             help    "The apex angle of the bounding cone of the light emitted by the SpotLight. No illumination takes placeoutside this angle. This is a full angle, measured from one side to the other. There is a falloff function applied between the outer and inner cones - see the angle_falloff_type attribute."
             disablewhen "{ xn__moonrayouter_cone_angle_control_lrb == block } { xn__moonrayouter_cone_angle_control_lrb == none }"
@@ -1332,6 +1334,7 @@
             name    "xn__moonrayinner_cone_angle_control_lrb"
             label   "moonray:inner_cone_angle"
             type    string
+            invisible
             default { "none" }
             hidewhen "{ primtype != UsdLuxDiskLight createprims == on }"
             menujoin {
@@ -1345,6 +1348,7 @@
             name    "xn__moonrayinner_cone_angle_keb"
             label   "Inner Cone Angle"
             type    float
+            invisible
             default { "30" }
             help    "The apex angle of the bright inner cone of the light emitted by the SpotLight. Full illumination takes place inside this region. This is a full angle, measured from one side to the other. There is a falloff function applied between the outer and inner cones - see the angle_falloff_type attribute."
             disablewhen "{ xn__moonrayinner_cone_angle_control_lrb == block } { xn__moonrayinner_cone_angle_control_lrb == none }"
@@ -1357,14 +1361,14 @@
     group {
         name    "folder5"
         label   "Falloff"
-        hidewhen "{ primtype != UsdLuxDiskLight createprims == on }"
+        hidewhen "{ spotlightenable == 0 xn__moonrayclass_nva != SpotLight } { primtype != UsdLuxSphereLight primtype != UsdLuxDiskLight xn__moonrayclass_nva != SpotLight }"
 
         parm {
             name    "xn__moonrayangle_falloff_type_control_uub"
             label   "moonray:angle_falloff_type"
             type    string
             default { "none" }
-            hidewhen "{ primtype != UsdLuxDiskLight createprims == on }"
+            hidewhen "{ spotlightenable == 0 xn__moonrayclass_nva != SpotLight } { primtype != UsdLuxSphereLight primtype != UsdLuxDiskLight xn__moonrayclass_nva != SpotLight }"
             menujoin {
                 "set"           "Set Or Create"
                 "setexisting"   "Set if Exists"
@@ -1379,7 +1383,7 @@
             default { "ease in/out" }
             help    "The falloff function applied between the outer and inner cones. To calculate this, the angle from the cone's axis to the the point being illuminated is measured as seen from the SpotLight's position. This angle is converted into a fractional value representing the fraction from the outer cone angle to the inner cone angle, clamped to the range [0,1]. The resulting value is then fed into one of the following user-selectable functions to determine the final 0-1 scaling value to be applied to thelight's radiance: \n  0 (off)         - no fallof, a step function at the outer cone boundary is applied\n  1 (linear)      - a linear ramp, i.e. the fractional parameter is applied as-is\n  2 (ease in)     - a quadratic ramp with zero gradient at the start point (outer cone)\n  3 (ease out)    - a quadratic ramp with zero gradient at the end point (inner cone)\n  4 (ease in/out) - a cubic ramp with zero gradient at both ends (outer and inner cone)\n"
             disablewhen "{ xn__moonrayangle_falloff_type_control_uub == block } { xn__moonrayangle_falloff_type_control_uub == none }"
-            hidewhen "{ primtype != UsdLuxDiskLight createprims == on }"
+            hidewhen "{ spotlightenable == 0 xn__moonrayclass_nva != SpotLight } { primtype != UsdLuxSphereLight primtype != UsdLuxDiskLight xn__moonrayclass_nva != SpotLight }"
             menu {
                 "off"           "Off"
                 "linear"        "Linear"
@@ -1394,7 +1398,7 @@
             label   "moonray:black_level"
             type    string
             default { "none" }
-            hidewhen "{ primtype != UsdLuxDiskLight createprims == on }"
+            hidewhen "{ spotlightenable == 0 xn__moonrayclass_nva != SpotLight } { primtype != UsdLuxSphereLight primtype != UsdLuxDiskLight xn__moonrayclass_nva != SpotLight }"
             menujoin {
                 "set"           "Set Or Create"
                 "setexisting"   "Set if Exists"
@@ -1404,12 +1408,12 @@
         }
         parm {
             name    "xn__moonrayblack_level_f5a"
-            label   "Black Level"
+            label   "Black Level (Lens Visibility)"
             type    float
             default { "0.001" }
-            help    "The radiance used for rendering the SpotLight lens as seen through the camera via a primary ray, when the true computed radiance would otherwise be black. This is simply a convenience feature to make the SpotLight lens visible in the camera view."
+            help    "Visible-lens visualization only. The radiance used for rendering the SpotLight lens as seen through the camera via a primary ray, when the true computed radiance would otherwise be black. This does not change scene illumination."
             disablewhen "{ xn__moonrayblack_level_control_gjb == block } { xn__moonrayblack_level_control_gjb == none }"
-            hidewhen "{ primtype != UsdLuxDiskLight createprims == on }"
+            hidewhen "{ spotlightenable == 0 xn__moonrayclass_nva != SpotLight } { primtype != UsdLuxSphereLight primtype != UsdLuxDiskLight xn__moonrayclass_nva != SpotLight }"
             range   { 0 10 }
             parmtag { "usdvaluetype" "float" }
         }
