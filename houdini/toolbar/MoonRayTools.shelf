@@ -18,4 +18,21 @@ moonray_material_builder.create_moonray_material_builder(kwargs)
       <keyword>material builder</keyword>
     </keywordList>
   </tool>
+  <tool name="moonrayrendersettings" label="MoonRay Render Settings" icon="ROP_usdrender">
+    <helpText><![CDATA[Create a MoonRay Solaris Render Settings node that authors USD RenderSettings, RenderProduct, a beauty RenderVar, and hdMoonRay moonray:sceneVariable renderer settings.]]></helpText>
+    <toolMenuContext name="network">
+      <contextOpType>Lop/DW_MOONRAY::moonrayrendersettings::1</contextOpType>
+    </toolMenuContext>
+    <toolSubmenu>MoonRay</toolSubmenu>
+    <script scriptType="python"><![CDATA[
+kwargs["node"].createNode("Lop::DW_MOONRAY::moonrayrendersettings::1", "moonrayrendersettings")
+]]></script>
+    <keywordList>
+      <keyword>MoonRay</keyword>
+      <keyword>Render Settings</keyword>
+      <keyword>HdMoonrayRendererPlugin</keyword>
+      <keyword>husk</keyword>
+      <keyword>rdl</keyword>
+    </keywordList>
+  </tool>
 </shelfDocument>
