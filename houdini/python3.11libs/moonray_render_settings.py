@@ -20,6 +20,7 @@ DEFAULT_RESOLUTION = (1920, 1080)
 
 SCENE_VARIABLES = (
     ("sampling_mode", Sdf.ValueTypeNames.Token),
+    ("light_sampling_mode", Sdf.ValueTypeNames.Token),
     ("pixel_samples", Sdf.ValueTypeNames.Int),
     ("light_samples", Sdf.ValueTypeNames.Int),
     ("bsdf_samples", Sdf.ValueTypeNames.Int),
@@ -27,6 +28,9 @@ SCENE_VARIABLES = (
     ("target_adaptive_error", Sdf.ValueTypeNames.Float),
     ("min_adaptive_samples", Sdf.ValueTypeNames.Int),
     ("max_adaptive_samples", Sdf.ValueTypeNames.Int),
+    ("batch_tile_order", Sdf.ValueTypeNames.Token),
+    ("progressive_tile_order", Sdf.ValueTypeNames.Token),
+    ("checkpoint_tile_order", Sdf.ValueTypeNames.Token),
     ("sample_clamping_value", Sdf.ValueTypeNames.Float),
     ("sample_clamping_depth", Sdf.ValueTypeNames.Int),
     ("roughness_clamping_factor", Sdf.ValueTypeNames.Float),
@@ -37,6 +41,31 @@ SCENE_VARIABLES = (
     ("max_presence_depth", Sdf.ValueTypeNames.Int),
     ("max_hair_depth", Sdf.ValueTypeNames.Int),
     ("max_volume_depth", Sdf.ValueTypeNames.Int),
+    ("max_subsurface_per_path", Sdf.ValueTypeNames.Int),
+    ("russian_roulette_threshold", Sdf.ValueTypeNames.Float),
+    ("transparency_threshold", Sdf.ValueTypeNames.Float),
+    ("presence_threshold", Sdf.ValueTypeNames.Float),
+    ("presence_quality", Sdf.ValueTypeNames.Float),
+    ("volume_quality", Sdf.ValueTypeNames.Float),
+    ("volume_shadow_quality", Sdf.ValueTypeNames.Float),
+    ("volume_illumination_samples", Sdf.ValueTypeNames.Int),
+    ("volume_opacity_threshold", Sdf.ValueTypeNames.Float),
+    ("volume_overlap_mode", Sdf.ValueTypeNames.Token),
+    ("volume_attenuation_factor", Sdf.ValueTypeNames.Float),
+    ("volume_contribution_factor", Sdf.ValueTypeNames.Float),
+    ("volume_phase_attenuation_factor", Sdf.ValueTypeNames.Float),
+    ("volume_indirect_samples", Sdf.ValueTypeNames.Int),
+    ("texture_blur", Sdf.ValueTypeNames.Float),
+    ("pixel_filter_width", Sdf.ValueTypeNames.Float),
+    ("pixel_filter", Sdf.ValueTypeNames.Token),
+    ("enable_dof", Sdf.ValueTypeNames.Bool),
+    ("enable_displacement", Sdf.ValueTypeNames.Bool),
+    ("enable_subsurface_scattering", Sdf.ValueTypeNames.Bool),
+    ("enable_shadowing", Sdf.ValueTypeNames.Bool),
+    ("enable_presence_shadows", Sdf.ValueTypeNames.Bool),
+    ("lights_visible_in_camera", Sdf.ValueTypeNames.Bool),
+    ("propagate_visibility_bounce_type", Sdf.ValueTypeNames.Bool),
+    ("shadow_terminator_fix", Sdf.ValueTypeNames.Token),
 )
 
 
@@ -74,6 +103,13 @@ def _set_rel_targets(schema_obj, create_rel, paths):
     return rel
 
 
+def _bool_parm(node, name, default=False):
+    parm = node.parm(name)
+    if parm is None:
+        return default
+    return bool(parm.eval())
+
+
 def author_from_node(node=None):
     """Author USD RenderSettings, RenderProduct, beauty RenderVar, and MoonRay settings."""
 
@@ -91,7 +127,6 @@ def author_from_node(node=None):
 
     settings = UsdRender.Settings.Define(stage, settings_path)
     product = UsdRender.Product.Define(stage, product_path)
-    beauty_var = UsdRender.Var.Define(stage, beauty_var_path)
 
     _set_rel_targets(settings, settings.CreateProductsRel, [product_path])
     if camera_path:
@@ -104,15 +139,19 @@ def author_from_node(node=None):
     product_name = _string_parm(node, "product_name", PRODUCT_NAME).strip() or PRODUCT_NAME
     product.CreateProductNameAttr().Set(product_name)
     product.CreateProductTypeAttr().Set("raster")
-    _set_rel_targets(product, product.CreateOrderedVarsRel, [beauty_var_path])
 
-    beauty_var.CreateDataTypeAttr().Set("color3f")
-    beauty_var.CreateSourceNameAttr().Set("color")
-    beauty_var.GetPrim().CreateAttribute(
-        "driver:parameters:aov:name",
-        Sdf.ValueTypeNames.String,
-        custom=True,
-    ).Set("color")
+    ordered_vars = []
+    if _bool_parm(node, "aov_beauty", True):
+        beauty_var = UsdRender.Var.Define(stage, beauty_var_path)
+        beauty_var.CreateDataTypeAttr().Set("color3f")
+        beauty_var.CreateSourceNameAttr().Set("color")
+        beauty_var.GetPrim().CreateAttribute(
+            "driver:parameters:aov:name",
+            Sdf.ValueTypeNames.String,
+            custom=True,
+        ).Set("color")
+        ordered_vars.append(beauty_var_path)
+    _set_rel_targets(product, product.CreateOrderedVarsRel, ordered_vars)
 
     settings_prim = settings.GetPrim()
     for name, value_type in SCENE_VARIABLES:
@@ -125,6 +164,8 @@ def author_from_node(node=None):
             value = int(parm.eval())
         elif value_type == Sdf.ValueTypeNames.Float:
             value = float(parm.eval())
+        elif value_type == Sdf.ValueTypeNames.Bool:
+            value = bool(parm.eval())
         settings_prim.CreateAttribute(
             "moonray:sceneVariable:" + name,
             value_type,
@@ -172,6 +213,76 @@ def _string_prim_path(name, label, default, help_text, select_existing=False, in
 
 def _label(name, label, text):
     return hou.LabelParmTemplate(name, label, (text,))
+
+
+def _scene_int(name, label, default, min_value=0, max_value=128, help_text=None):
+    return hou.IntParmTemplate(
+        "sceneVariable_" + name,
+        label,
+        1,
+        (default,),
+        min=min_value,
+        max=max_value,
+        help=help_text or ("MoonRay %s SceneVariable." % name),
+    )
+
+
+def _scene_float(name, label, default, min_value=0.0, max_value=10.0, help_text=None):
+    return hou.FloatParmTemplate(
+        "sceneVariable_" + name,
+        label,
+        1,
+        (default,),
+        min=min_value,
+        max=max_value,
+        help=help_text or ("MoonRay %s SceneVariable." % name),
+    )
+
+
+def _scene_toggle(name, label, default, help_text=None):
+    return hou.ToggleParmTemplate(
+        "sceneVariable_" + name,
+        label,
+        default_value=default,
+        help=help_text or ("MoonRay %s SceneVariable." % name),
+    )
+
+
+def _scene_menu(name, label, tokens, labels, default_token, help_text=None):
+    parm = hou.MenuParmTemplate(
+        "sceneVariable_" + name,
+        label,
+        tokens,
+        labels,
+        default_value=tokens.index(default_token),
+        help=help_text or ("MoonRay %s SceneVariable." % name),
+    )
+    parm.setMenuType(hou.menuType.Normal)
+    return parm
+
+
+TILE_ORDER_TOKENS = (
+    "top",
+    "bottom",
+    "left",
+    "right",
+    "morton",
+    "random",
+    "spiral square",
+    "spiral rect",
+    "morton shiftflip",
+)
+TILE_ORDER_LABELS = (
+    "Top",
+    "Bottom",
+    "Left",
+    "Right",
+    "Morton",
+    "Random",
+    "Spiral Square",
+    "Spiral Rect",
+    "Morton Shift Flip",
+)
 
 
 def _build_parm_template_group():
@@ -254,19 +365,27 @@ def _build_parm_template_group():
         }
     )
     ptg.append(res_mode)
-    ptg.append(
-        resolution := hou.IntParmTemplate(
-            "resolution",
-            "Resolution",
-            2,
-            DEFAULT_RESOLUTION,
-            naming_scheme=hou.parmNamingScheme.XYZW,
-            min=1,
-            max=8192,
-            min_is_strict=True,
-            help="Offline husk/USD renders use this resolution through RenderSettings. Viewport/IPR resolution is driven by the viewport.",
+    resolution = hou.IntParmTemplate(
+        "resolution",
+        "Resolution",
+        2,
+        DEFAULT_RESOLUTION,
+        naming_scheme=hou.parmNamingScheme.XYZW,
+        min=1,
+        max=8192,
+        min_is_strict=True,
+        help="Offline husk/USD renders use this resolution through RenderSettings. Viewport/IPR resolution is driven by the viewport.",
+    )
+    resolution.setDefaultExpression(
+        (
+            "",
+            'pythonexprf("__import__(\\\'loputils\\\').computeResolutionParameter(True, True)")',
         )
     )
+    resolution.setDefaultExpressionLanguage(
+        (hou.scriptLanguage.Hscript, hou.scriptLanguage.Hscript)
+    )
+    ptg.append(resolution)
     resolution_menu = hou.MenuParmTemplate(
         "resolutionMenu",
         "Choose Resolution",
@@ -303,6 +422,20 @@ def _build_parm_template_group():
         )
     )
 
+    aovs = (
+        hou.ToggleParmTemplate(
+            "aov_beauty",
+            "Beauty",
+            default_value=True,
+            help="Author the primary beauty RenderVar. Additional AOV checkboxes are deferred until the main MoonRay delegate fills non-beauty AOV buffers reliably.",
+        ),
+        _label(
+            "aov_deferred_note",
+            "Deferred AOVs",
+            "Albedo, normal, geometric normal, depth, motion vectors, and OIDN helper AOVs are verified in MoonRay's local/debug path but remain hidden here until the main HdMoonrayRendererPlugin fills those buffers through USD Render ROP.",
+        ),
+    )
+
     render_product = (
         hou.StringParmTemplate(
             "render_product_name",
@@ -321,54 +454,54 @@ def _build_parm_template_group():
         _label(
             "beauty_note",
             "Beauty Output",
-            "Derived paths: RenderProduct under the RenderProducts parent and beauty RenderVar under the RenderVars parent. AOV and Cryptomatte controls are deferred.",
+            "Derived paths: RenderProduct under the RenderProducts parent and beauty RenderVar under the RenderVars parent. AOV and Cryptomatte controls beyond beauty are deferred.",
         ),
     )
 
     sampling = [
-        hou.MenuParmTemplate(
-            "sceneVariable_sampling_mode",
+        _scene_menu(
+            "sampling_mode",
             "Sampling Mode",
             ("uniform", "adaptive"),
             ("Uniform", "Adaptive"),
-            default_value=0,
-            help="MoonRay SceneVariables sampling_mode. Metadata values are uniform = 0 and adaptive = 2; this node authors the token form used by the generic Solaris Render Settings Moonray tab.",
+            "uniform",
+            "Controls which sampling scheme to use: uniform or adaptive.",
         ),
-        hou.IntParmTemplate(
-            "sceneVariable_pixel_samples",
+        _scene_menu(
+            "light_sampling_mode",
+            "Light Sampling Mode",
+            ("uniform", "adaptive"),
+            ("Uniform", "Adaptive"),
+            "uniform",
+            "Controls which light sampling scheme to use: uniform or adaptive.",
+        ),
+        _scene_int(
+            "pixel_samples",
             "Pixel Samples",
-            1,
-            (8,),
-            min=0,
-            max=4096,
-            help="MoonRay pixel_samples SceneVariable.",
+            8,
+            max_value=4096,
+            help_text="The square root of the number of primary samples taken for each pixel in uniform sampling mode.",
         ),
-        hou.IntParmTemplate(
-            "sceneVariable_light_samples",
+        _scene_int(
+            "light_samples",
             "Light Samples",
-            1,
-            (2,),
-            min=0,
-            max=4096,
-            help="MoonRay light_samples SceneVariable.",
+            2,
+            max_value=4096,
+            help_text="The square root of the number of samples taken for each light on the primary intersection.",
         ),
-        hou.IntParmTemplate(
-            "sceneVariable_bsdf_samples",
+        _scene_int(
+            "bsdf_samples",
             "BSDF Samples",
-            1,
-            (2,),
-            min=0,
-            max=4096,
-            help="MoonRay bsdf_samples SceneVariable.",
+            2,
+            max_value=4096,
+            help_text="The square root of the number of samples taken for BSDF lobe evaluations on the primary intersection.",
         ),
-        hou.IntParmTemplate(
-            "sceneVariable_bssrdf_samples",
+        _scene_int(
+            "bssrdf_samples",
             "BSSRDF Samples",
-            1,
-            (2,),
-            min=0,
-            max=4096,
-            help="MoonRay bssrdf_samples SceneVariable.",
+            2,
+            max_value=4096,
+            help_text="The square root of the number of samples taken to evaluate BSSRDF contributions on the primary intersection.",
         ),
     ]
     adaptive_cond = "{ sceneVariable_sampling_mode != adaptive }"
@@ -386,20 +519,45 @@ def _build_parm_template_group():
             "MoonRay max_adaptive_samples SceneVariable. Used by adaptive sampling.",
         ),
     ):
-        parm = hou.IntParmTemplate(name, label, 1, (default,), min=0, max=8192, help=help_text)
+        parm = _scene_int(name.replace("sceneVariable_", ""), label, default, max_value=8192, help_text=help_text)
         parm.setConditional(hou.parmCondType.DisableWhen, adaptive_cond)
         sampling.append(parm)
-    target_error = hou.FloatParmTemplate(
-        "sceneVariable_target_adaptive_error",
+    target_error = _scene_float(
+        "target_adaptive_error",
         "Target Adaptive Error",
-        1,
-        (10.0,),
-        min=0,
-        max=100,
-        help="MoonRay target_adaptive_error SceneVariable. Used by adaptive sampling.",
+        10.0,
+        max_value=100.0,
+        help_text="When adaptive sampling is turned on, this represents the desired quality of the output images.",
     )
     target_error.setConditional(hou.parmCondType.DisableWhen, adaptive_cond)
     sampling.append(target_error)
+
+    tile_order = (
+        _scene_menu(
+            "batch_tile_order",
+            "Batch Tile Order",
+            TILE_ORDER_TOKENS,
+            TILE_ORDER_LABELS,
+            "morton",
+            "Specifies the order in which tiles are prioritized for batch rendering.",
+        ),
+        _scene_menu(
+            "progressive_tile_order",
+            "Progressive Tile Order",
+            TILE_ORDER_TOKENS,
+            TILE_ORDER_LABELS,
+            "morton",
+            "Specifies the order in which tiles are prioritized for progressive rendering.",
+        ),
+        _scene_menu(
+            "checkpoint_tile_order",
+            "Checkpoint Tile Order",
+            TILE_ORDER_TOKENS,
+            TILE_ORDER_LABELS,
+            "morton",
+            "Specifies the order in which tiles are prioritized for checkpoint rendering.",
+        ),
+    )
 
     ray_depth = []
     for name, label, default in (
@@ -412,44 +570,137 @@ def _build_parm_template_group():
         ("sceneVariable_max_volume_depth", "Max Volume Depth", 1),
     ):
         ray_depth.append(
-            hou.IntParmTemplate(
-                name,
+            _scene_int(
+                name.replace("sceneVariable_", ""),
                 label,
-                1,
-                (default,),
-                min=0,
-                max=128,
-                help="MoonRay %s SceneVariable." % name.replace("sceneVariable_", ""),
+                default,
+                max_value=128,
+                help_text="MoonRay %s SceneVariable." % name.replace("sceneVariable_", ""),
             )
         )
+    ray_depth.extend(
+        (
+            _scene_int(
+                "max_subsurface_per_path",
+                "Max Subsurface Per Path",
+                1,
+                max_value=32,
+                help_text='The maximum ray depth to allow subsurface scattering. For ray depths beyond this limit Lambertian diffuse is used to approximate subsurface scattering.',
+            ),
+            _scene_float(
+                "russian_roulette_threshold",
+                "Russian Roulette Threshold",
+                0.0375,
+                max_value=10,
+                help_text="The Russian roulette threshold specifies the luminance point at which Russian roulette is evaluated for direct light sampling and BSDF continuation.",
+            ),
+            _scene_float(
+                "transparency_threshold",
+                "Transparency Threshold",
+                1.0,
+                max_value=10,
+                help_text="The transparency threshold defines the point at which accumulated opacity can be considered opaque.",
+            ),
+            _scene_float(
+                "presence_threshold",
+                "Presence Threshold",
+                0.999,
+                max_value=10,
+                help_text="The presence threshold defines the point at which accumulated presence can be considered opaque.",
+            ),
+            _scene_float(
+                "presence_quality",
+                "Presence Quality",
+                0.75,
+                max_value=10,
+                help_text="Controls the threshold for stochastic presence sampling along paths.",
+            ),
+        )
+    )
 
     clamping = (
-        hou.FloatParmTemplate(
-            "sceneVariable_sample_clamping_value",
+        _scene_float(
+            "sample_clamping_value",
             "Sample Clamping Value",
-            1,
-            (10.0,),
-            min=0,
-            max=100,
-            help="Clamp sample values before they are accumulated.",
+            10.0,
+            max_value=100,
+            help_text="Clamp sample radiance values to this maximum value. A value of 0 disables the effect.",
         ),
-        hou.IntParmTemplate(
-            "sceneVariable_sample_clamping_depth",
+        _scene_int(
+            "sample_clamping_depth",
             "Sample Clamping Depth",
             1,
-            (1,),
-            min=0,
-            max=32,
-            help="Ray depth after which sample clamping is applied.",
+            max_value=32,
+            help_text="Clamp sample values only after the given non-specular ray depth.",
         ),
-        hou.FloatParmTemplate(
-            "sceneVariable_roughness_clamping_factor",
+        _scene_float(
+            "roughness_clamping_factor",
             "Roughness Clamping Factor",
-            1,
-            (0.0,),
-            min=0,
-            max=10,
-            help="Clamp material roughness along paths. A value of 1 clamps values to the maximum roughness encountered, while lower values temper the clamping value. 0 disables the effect. Using this technique reduces fireflies from indirect caustics but is biased.",
+            0.0,
+            max_value=10,
+            help_text="Clamp material roughness along paths. A value of 1 clamps values to the maximum roughness encountered, while lower values temper the clamping value. 0 disables the effect. Using this technique reduces fireflies from indirect caustics but is biased.",
+        ),
+    )
+
+    volumes = (
+        _scene_float("volume_quality", "Volume Quality", 0.5, max_value=10, help_text="Controls the overall quality of volume rendering."),
+        _scene_float("volume_shadow_quality", "Volume Shadow Quality", 1.0, max_value=10, help_text="Controls the quality of volume shadow transmittance."),
+        _scene_int("volume_illumination_samples", "Volume Illumination Samples", 4, max_value=128, help_text="Sample number along the ray when computing volume scattering radiance towards the eye. Set to 0 to turn off volume lighting completely."),
+        _scene_float("volume_opacity_threshold", "Volume Opacity Threshold", 0.995, max_value=10, help_text="Stop further volume integration when accumulated opacity exceeds this threshold."),
+        _scene_menu(
+            "volume_overlap_mode",
+            "Volume Overlap Mode",
+            ("sum", "max", "rnd"),
+            ("Sum", "Max", "Random"),
+            "sum",
+            "Selects how to handle contributions from overlapping volumes.",
+        ),
+        _scene_float("volume_attenuation_factor", "Volume Attenuation Factor", 0.65, max_value=10, help_text="Controls how volume attenuation gets exponentially scaled down when rendering multiple scattering volumes."),
+        _scene_float("volume_contribution_factor", "Volume Contribution Factor", 0.65, max_value=10, help_text="Controls how scattering contribution gets exponentially scaled down when rendering multiple scattering volumes."),
+        _scene_float("volume_phase_attenuation_factor", "Volume Phase Attenuation Factor", 0.5, max_value=10, help_text="Controls how phase function anisotropy gets exponentially scaled down when rendering multiple scattering volumes."),
+        _scene_int("volume_indirect_samples", "Volume Indirect Samples", 0, max_value=128, help_text="Number of indirect illumination samples on volumes per primary ray."),
+    )
+
+    filtering = (
+        _scene_float("texture_blur", "Texture Blur", 0.0, max_value=10, help_text="Adjusts the amount of texture filtering."),
+        _scene_float("pixel_filter_width", "Pixel Filter Width", 3.0, max_value=10, help_text="The overall extents, in pixels, of the pixel filter."),
+        _scene_menu(
+            "pixel_filter",
+            "Pixel Filter Type",
+            ("box", "cubic b-spline", "quadratic b-spline"),
+            ("Box", "Cubic B-Spline", "Quadratic B-Spline"),
+            "cubic b-spline",
+            "The type of filter used for filter importance sampling.",
+        ),
+    )
+
+    global_toggles = (
+        _scene_toggle("enable_dof", "Enable DOF", True, help_text="Enables or disables camera depth-of-field."),
+        _scene_toggle("enable_displacement", "Enable Displacement", True, help_text="Enables or disables geometry displacement."),
+        _scene_toggle("enable_subsurface_scattering", "Enable Subsurface Scattering", True, help_text="Enables or disables subsurface scattering."),
+        _scene_toggle("enable_shadowing", "Enable Shadowing", True, help_text="Enables or disables shadowing through occlusion rays."),
+        _scene_toggle("enable_presence_shadows", "Enable Presence Shadows", False, help_text='Whether or not to respect a material\'s "presence" value for shadow rays.'),
+        _scene_toggle("lights_visible_in_camera", "Lights Visible in Camera", False, help_text="Globally enables or disables lights being visible in camera."),
+        _scene_toggle("propagate_visibility_bounce_type", "Propagate Visibility Bounce Type", False, help_text="Turns on/off propagation for ray visibility masks."),
+        _scene_menu(
+            "shadow_terminator_fix",
+            "Shadow Terminator Fix",
+            (
+                "Off",
+                "On",
+                "On (Sine Compensation Alternative)",
+                "On (GGX Compensation Alternative)",
+                "On (Cosine Compensation Alternative)",
+            ),
+            (
+                "Off",
+                "On",
+                "On (Sine Compensation Alternative)",
+                "On (GGX Compensation Alternative)",
+                "On (Cosine Compensation Alternative)",
+            ),
+            "Off",
+            "Attempt to soften hard shadow terminator boundaries due to shading/geometric normal deviations.",
         ),
     )
 
@@ -470,10 +721,15 @@ def _build_parm_template_group():
             "moonray_settings",
             "MoonRay Render Settings",
             (
+                hou.FolderParmTemplate("aovs", "AOVs", aovs),
                 hou.FolderParmTemplate("render_product", "Render Product", render_product),
                 hou.FolderParmTemplate("sampling", "Sampling", sampling),
-                hou.FolderParmTemplate("ray_depth", "Ray Depth", ray_depth),
-                hou.FolderParmTemplate("clamping", "Clamping", clamping),
+                hou.FolderParmTemplate("tile_order", "Tile Order", tile_order),
+                hou.FolderParmTemplate("ray_depth", "Ray Depth / Path", ray_depth),
+                hou.FolderParmTemplate("clamping", "Clamping / Fireflies", clamping),
+                hou.FolderParmTemplate("volumes", "Volumes", volumes),
+                hou.FolderParmTemplate("filtering", "Filtering / Textures", filtering),
+                hou.FolderParmTemplate("global_toggles", "Global Toggles", global_toggles),
                 hou.FolderParmTemplate("debug", "Debug", debug),
             ),
             folder_type=hou.folderType.Tabs,
