@@ -1,0 +1,695 @@
+# MoonRay Render Settings LOP Audit
+
+## Scope
+
+This is a technical development/audit note for the MoonRay Render Settings LOP work in Houdini Solaris. It is not a polished public user manual.
+
+- Validation target for this pass: Houdini 20.5 only.
+- Custom node name: `moonrayrendersettings1`.
+- Custom HDA/operator: `Lop::DW_MOONRAY::moonrayrendersettings::1`.
+- Repo source path: `moonray/moonray_dcc_plugins/houdini/python3.11libs/moonray_render_settings.py`.
+- HDA path: `moonray/moonray_dcc_plugins/houdini/otls/Lop::DW_MOONRAY::moonrayrendersettings::1.hda`.
+- Installed runtime module path used by Houdini 20.5 validation: `/Applications/MoonRay/installs/openmoonray/plugin/houdini/python3.11libs/moonray_render_settings.py`.
+- Houdini 21 evidence is out of scope for this pass and should not be mixed with the Houdini 20.5 results below.
+
+## References Consulted
+
+### OpenUSD RenderSettings / RenderProduct / RenderVar
+
+- [usdRender overview](https://openusd.org/dev/user_guides/schemas/usdRender/overview.html): Used for the RenderSettings, RenderProduct, and RenderVar schema relationship model.
+- [RenderSettings schema](https://openusd.org/dev/user_guides/schemas/usdRender/RenderSettings.html): Used to confirm the render settings prim is the global render invocation/configuration prim.
+- [RenderProduct schema](https://openusd.org/dev/user_guides/schemas/usdRender/RenderProduct.html): Used to confirm product/output path and ordered render variable ownership.
+- [RenderVar schema](https://openusd.org/dev/user_guides/schemas/usdRender/RenderVar.html): Used to confirm output variable/AOV authoring expectations.
+- [Render settings proposal](https://openusd.org/release/wp_render_settings.html): Used as background for the USD RenderSettings/Product/Var design.
+- [USD render user guide](https://openusd.org/dev/user_guides/render_user_guide.html): Used for the broader USD rendering workflow context.
+
+### SideFX Solaris / USD Render ROP
+
+- [Render Settings LOP](https://www.sidefx.com/docs/houdini/nodes/lop/rendersettings.html): Primary Houdini/Solaris authoring reference.
+- [Render Product LOP](https://www.sidefx.com/docs/houdini/nodes/lop/renderproduct.html): Used to compare productName/productType/orderedVars authoring.
+- [Render Var LOP](https://www.sidefx.com/docs/houdini/nodes/lop/rendervar.html): Used to compare Beauty RenderVar authoring and driver parameter extras.
+- [USD Render ROP](https://www.sidefx.com/docs/houdini/nodes/out/usdrender.html): Used to confirm the USD Render ROP execution/wiring model.
+
+### SideFX HOM / LOP Python
+
+- [hou.LopNode](https://www.sidefx.com/docs/houdini/hom/hou/LopNode.html): Used for Python LOP/HDA stage access and validation.
+- [hou.lop](https://www.sidefx.com/docs/houdini/hom/hou/lop.html): Used for Solaris/HOM context.
+
+### SideFX HDK / USD / Hydra
+
+- [HDK USD Hydra customization](https://www.sidefx.com/docs/hdk/_h_d_k__u_s_d_hydra.html): Used for Houdini/Hydra integration context.
+- [LOP_Node header/source](https://www.sidefx.com/docs/hdk/_l_o_p___node_8h_source.html): Used for LOP implementation and cooking context.
+
+### SideFX Houdini Digital Asset / UI References
+
+- [Asset UI](https://www.sidefx.com/docs/houdini/assets/asset_ui.html): Used for HDA parameter UI conventions.
+- [Editing assets](https://www.sidefx.com/docs/houdini/assets/edit.html): Used for HDA/source-of-truth considerations.
+- [Operator Type Properties](https://www.sidefx.com/docs/houdini/ref/windows/optype.html): Used for HDA operator definition behavior.
+- [Edit Properties LOP](https://www.sidefx.com/docs/houdini/nodes/lop/editproperties.html): Used as context for Houdini's generic USD property authoring model.
+
+### OpenMoonRay / HdMoonRay
+
+- [HdMoonRay Render Settings](https://docs.openmoonray.org/user-reference/tools/hydra/render-settings/): Used for the MoonRay/Hydra render settings path.
+- [HdMoonRay setup](https://docs.openmoonray.org/user-reference/tools/hydra/hdmoonray-setup/): Used for plugin/runtime environment context.
+- [HdMoonRay commands](https://docs.openmoonray.org/user-reference/tools/hydra/commands/): Used for `husk`/Hydra command-line context.
+- [HdMoonRay Houdini](https://docs.openmoonray.org/user-reference/tools/hydra/hdmoonray-houdini/): Used for Houdini integration context.
+- [HdMoonRay features](https://docs.openmoonray.org/user-reference/tools/hydra/hdmoonray-features/): Used for feature support context.
+- [MoonRay scene objects](https://docs.openmoonray.org/user-reference/scene-objects/): Used for RDL scene object context.
+- [SceneVariables](https://docs.openmoonray.org/user-reference/scene-objects/scene-variables/SceneVariables/): Used to classify MoonRay SceneVariables.
+- [RenderOutput](https://docs.openmoonray.org/user-reference/scene-objects/render-output/RenderOutput/): Used for MoonRay-side output/AOV realization.
+- [Render outputs guide](https://docs.openmoonray.org/user-reference/how-to-guides/render-outputs/): Used for MoonRay RenderOutput workflow context.
+- [OpenMoonRay developer reference](https://docs.openmoonray.org/developer-reference/): Used for developer-level source/library context.
+
+### Autodesk / Arnold AOV References
+
+These were treated only as practical renderer/AOV workflow references, not as MoonRay truth.
+
+- [arnold-usd](https://github.com/Autodesk/arnold-usd)
+- [Arnold expression AOVs](https://help.autodesk.com/cloudhelp/ENU/AR-Core/files/ac-output-aovs/arnold_user_guide_ac_output_aovs_ac_expression_aovs_html.html)
+- [Arnold AOV shaders](https://help.autodesk.com/cloudhelp/ENU/AR-Core/files/ac-shading/arnold_user_guide_ac_shading_ac_aov_shaders_html.html)
+- [Arnold for Cinema 4D AOVs](https://help.autodesk.com/cloudhelp/JPN/AR-Cinema4D/files/ci-arnold-render-settings/arnold_for_cinema_4d_ci_Arnold_Render_Settings_ci_AOVs_html.html)
+- [Arnold for 3ds Max AOVs](https://help.autodesk.com/view/3DSMAX/2024/ENU/?guid=arnold_for_3ds_max_ax_render_setup_ax_aovs_html)
+
+## Source of Truth and Runtime Import Rules
+
+The repo `moonray_render_settings.py` is the source of truth for the custom MoonRay Render Settings LOP. The HDA UI and cook-time Python must come from the same definition list. The generated HDA imports `moonray_render_settings` at cook time, so the module imported by Houdini must match the source used to generate the HDA.
+
+Runtime import path used by Houdini 20.5 validation:
+
+```text
+/Applications/MoonRay/installs/openmoonray/plugin/houdini/python3.11libs/moonray_render_settings.py
+```
+
+Verification commands inside Houdini 20.5 `hython`:
+
+```python
+import moonray_render_settings
+print(moonray_render_settings.__file__)
+print(len(moonray_render_settings.SCENE_VARIABLES))
+print(any(name == "enable_dof" for name, _ in moonray_render_settings.SCENE_VARIABLES))
+print(any(name == "light_sampling_mode" for name, _ in moonray_render_settings.SCENE_VARIABLES))
+```
+
+The drift bug happened because the visible HDA UI was newer than the installed Python module that Houdini imported at cook time. The repo source and HDA contained newer settings, but Houdini 20.5 loaded the stale installed module from the plugin install tree.
+
+The local install-tree sync used during validation copied the repo source and regenerated HDA into the installed plugin tree. That was a validation step, not a final manual-install solution. Future repo/install tooling must keep the HDA and runtime Python module aligned reproducibly.
+
+## Proven Drift Bug
+
+Before the source/install sync:
+
+- HDA UI showed `Enable DOF`.
+- Installed runtime module had only 18 SceneVariables.
+- `enable_dof` was missing from the installed runtime module.
+- Custom USD did not author `moonray:sceneVariable:enable_dof`.
+- Custom RDLA kept camera `["dof"] = true`.
+
+After the source/install sync:
+
+- Installed runtime module has 50 SceneVariables.
+- `enable_dof` is present.
+- `light_sampling_mode` is present.
+- Custom USD authors `custom bool moonray:sceneVariable:enable_dof = 0`.
+- Custom RDLA contains `["enable_dof"] = false`.
+
+## USD RenderSettings / RenderProduct / RenderVar Contract
+
+The USD render contract is:
+
+- `RenderSettings` owns render invocation/global render settings.
+- `RenderSettings` has the render camera relationship.
+- `RenderSettings` has the products relationship.
+- `RenderProduct` owns `productName`, `productType`, and `orderedVars`.
+- `RenderVar` describes an AOV/output variable.
+- AOVs flow through `RenderSettings -> RenderProduct -> orderedVars -> RenderVar`.
+- The MoonRay backend realizes render outputs as MoonRay `RenderOutput` objects.
+
+Current custom authored paths:
+
+```text
+/Render/rendersettings
+/Render/Products/renderproduct
+/Render/Products/Vars/beauty
+```
+
+## Render Product and Output Path Rules
+
+`RenderProduct.productName` is the final image output path authored by the custom LOP. `$F4` frame tokens are preserved in the authored USD and expand during render execution.
+
+When the USD Render ROP `outputimage` override is blank, the RenderProduct output path wins. A Houdini 20.5 smoke test wrote:
+
+```text
+/tmp/moonray_render_settings_alignment_after/rop_product.0001.exr
+```
+
+That smoke render was black. It proves USD Render ROP wiring, RenderProduct output creation, and resolution/output path behavior only. It does not prove filled-pixel Beauty/AOV success.
+
+## Resolution Behavior
+
+The custom MoonRay Render Settings LOP uses manual resolution only.
+
+Earlier prototypes mirrored Karma's computed camera-aperture modes:
+
+- Set Width, Compute Height from Camera.
+- Set Height, Compute Width from Camera.
+
+Those computed modes were removed in the H20.5 UI/lifecycle cleanup pass to reduce callback and lifecycle complexity. The node now exposes a simple `Manual Resolution` note plus a directly editable `Resolution` integer pair.
+
+Validated dimensions:
+
+- Manual: `512 x 256`.
+
+The custom LOP authors final numeric resolution as `RenderSettings.resolution`. It must not author `moonray:sceneVariable:image_width` or `moonray:sceneVariable:image_height`.
+
+## SceneVariables and Render Settings
+
+MoonRay render settings that target RDL `SceneVariables` are authored as `moonray:sceneVariable:*` custom attributes on the `RenderSettings` prim where appropriate.
+
+`image_width` and `image_height` should not be authored by the custom LOP. They appear in RDLA from Hydra/render-pass framing, not from custom USD SceneVariable attributes.
+
+Current custom USD now authors:
+
+- `moonray:sceneVariable:enable_dof`.
+- `moonray:sceneVariable:light_sampling_mode`.
+- Tile order settings.
+- `moonray:sceneVariable:roughness_clamping_factor`.
+- `moonray:sceneVariable:target_adaptive_error`.
+
+RDLA proves MoonRay receives `enable_dof`, `light_sampling_mode`, `target_adaptive_error`, and `roughness_clamping_factor`.
+
+| UI label | USD attr | USD type | RDLA key | Current status |
+|---------|----------|----------|----------|----------------|
+| Enable DOF | `moonray:sceneVariable:enable_dof` | bool | `enable_dof` | working after drift fix |
+| Light Sampling Mode | `moonray:sceneVariable:light_sampling_mode` | token/string | `light_sampling_mode` | working after drift fix |
+| Target Adaptive Error | `moonray:sceneVariable:target_adaptive_error` | float | `target_adaptive_error` | working after drift fix |
+| Roughness Clamping Factor | `moonray:sceneVariable:roughness_clamping_factor` | float | `roughness_clamping_factor` | working after drift fix |
+| Image Width | do not author | n/a | `image_width` | render-pass-derived |
+| Image Height | do not author | n/a | `image_height` | render-pass-derived |
+
+## Parameter Location Classification
+
+The Render Settings LOP must not absorb every MoonRay or USD setting. Not every `moonray:*` attribute belongs on `RenderSettings`.
+
+| Area | Example | Correct USD location | USD kind | MoonRay/RDL target | Should this Render Settings LOP author it? | Correct authoring path | Status |
+|------|---------|----------------------|----------|--------------------|--------------------------------------------|------------------------|--------|
+| Render settings | pixel samples | RenderSettings prim | `moonray:sceneVariable:*` attr | SceneVariables | yes | custom Render Settings LOP | verify/working |
+| Render output/AOV | beauty/color | RenderVar + RenderProduct orderedVars | UsdRenderVar | RenderOutput | yes for validated outputs | AOV tab / RenderVar authoring | Beauty only |
+| Geometry settings | `moonray:mesh_resolution` | geometry prim | primvar or namespaced prim attr | RDL geometry setting | no | LOP wrangle / geometry settings node | document only |
+| Camera/DOF settings | DOF enable/focus/aperture depending on native behavior | camera prim or RenderSettings depending on proven path | camera attr or SceneVariable | Camera / SceneVariables | only if native path proves it | match H20.5 generic/native | audit |
+| Light settings | MoonRay light attrs | light prim | namespaced attrs | RDL light | no | light LOP / light-specific UI | document only |
+| Material settings | material/shader attrs | material/shader prim | shader inputs | RDL material | no | material network | document only |
+| Debug/RDLA output | RDLA dump path/options | RenderSettings/delegate setting if proven | renderer/debug setting | hdMoonRay/debug | yes, Advanced/Debug only | custom Render Settings LOP | verify |
+
+Do not expose `moonray:mesh_resolution` in the Render Settings LOP as a global render setting. Geometry, light, material, and camera prim-level settings belong on their own prims unless Houdini 20.5 native/generic behavior proves otherwise.
+
+## Beauty RenderVar and AOV Status
+
+Beauty is the only exposed AOV for now.
+
+Current custom Beauty RenderVar:
+
+```text
+Path: /Render/Products/Vars/beauty
+sourceName = color
+sourceType = raw
+dataType = color3f
+driver:parameters:aov:name = color
+driver:parameters:aov:format = color3f
+driver:parameters:aov:multiSampled = 0
+driver:parameters:aov:clearValue = 0
+```
+
+Generic Houdini 20.5 RenderVar extras now aligned:
+
+- `sourceType = raw`.
+- `driver:parameters:aov:format = color3f`.
+- `driver:parameters:aov:multiSampled = 0`.
+- `driver:parameters:aov:clearValue = 0`.
+
+Houdini `customData` appears to be UI/editor metadata and should not be hand-copied unless the integration deliberately adopts the generic/Edit Properties infrastructure.
+
+Non-beauty AOV status:
+
+- Hidden/deferred.
+- Do not expose until production `HdMoonrayRendererPlugin` returns nonzero buffers through USD Render ROP/husk.
+- Debug/local path filling non-beauty buffers is not enough for artist UI exposure.
+- If the production path produces zero-filled buffers, classify that as backend payload unresolved, not UI-ready.
+
+## USD Render ROP Integration
+
+Houdini 20.5 USD Render ROP parameter names for both LOP `usdrender_rop` and OUT `usdrender`:
+
+- `renderer`.
+- `loppath`.
+- `rendersettings`.
+- `outputimage`.
+
+Houdini 20.5 `husk --list-renderers` sees:
+
+- `HdMoonrayRendererPlugin (Moonray)`.
+- `HdMoonrayRendererDebugPlugin (Moonray (debug))`.
+
+Houdini 20.5 USD Render ROP menu shows Moonray. The smoke test used the LOP `usdrender_rop` path:
+
+```text
+renderer = HdMoonrayRendererPlugin
+loppath = /stage/moonrayrendersettings1
+rendersettings = /Render/rendersettings
+outputimage = ""
+```
+
+Output path:
+
+```text
+/tmp/moonray_render_settings_alignment_after/rop_product.0001.exr
+```
+
+The smoke output was black, so it should be treated as wiring/output creation evidence only.
+
+## USD Render ROP Auto-Creation Policy
+
+The MoonRay Render Settings LOP intentionally auto-creates a matching USD Render ROP LOP node on node creation. This is part of the desired integrated artist workflow: creating the render settings node should immediately leave the offline render path ready to use.
+
+The custom LOP authors `/Render/rendersettings` and the RenderProduct controls the final image output path. The auto-created `usdrender_rop` LOP is an execution wrapper connected below the settings LOP and pointed at that authored RenderSettings prim. The ROP `outputimage` parameter is deliberately left blank so `RenderProduct.productName` remains the source of truth for output path and `$F4` behavior.
+
+Houdini 20.5 ROP details:
+
+```text
+Context: same LOP network as the MoonRay Render Settings LOP
+Node type: usdrender_rop
+renderer = HdMoonrayRendererPlugin
+loppath = <current MoonRay Render Settings LOP path>
+rendersettings = /Render/rendersettings
+outputimage = ""
+```
+
+Ownership is recorded on the ROP with userData:
+
+```text
+moonray_render_settings_lop = <owning LOP path>
+moonray_render_settings_operator = Lop::DW_MOONRAY::moonrayrendersettings::1
+moonray_render_settings_lop_session_id = <owning LOP session id>
+```
+
+The deterministic LOP ROP node name is based on the MoonRay Render Settings LOP node name:
+
+```text
+/stage/moonrayrendersettings1_usdrender
+```
+
+The creation/update helper is idempotent and non-destructive:
+
+- If the owned `usdrender_rop` exists, update it.
+- If it does not exist, create it in the same LOP network.
+- Running the helper repeatedly must not create duplicates.
+- Do not overwrite unrelated user-created USD Render ROP LOPs.
+- If the deterministic name already exists but is not owned by the MoonRay Render Settings LOP, create a unique safe name instead.
+- Multiple MoonRay Render Settings LOPs should each create a distinct owned ROP.
+
+Rename behavior:
+
+- During the current Houdini session, the helper stores the owning LOP session id and can update the owned ROP after a LOP rename.
+- Across saved/reloaded sessions, robust rename recovery may be limited if the old path and session id no longer identify the owner. In that case, the repair helper should avoid overwriting unrelated ROPs and create/update only clearly owned ROPs.
+
+An optional `Create / Update USD Render ROP` repair button calls the same helper used by the HDA `OnCreated` event. It is a secondary repair/update affordance, not a replacement for automatic ROP creation.
+
+Do not auto-create or update ROPs during normal cook or ordinary parameter changes.
+
+## Design Guidelines
+
+- Native Solaris first.
+- Use Houdini 20.5 Generic Render Settings as UX/layout reference.
+- Expose curated artist controls, not raw metadata dumps.
+- Group by task, not JSON order.
+- Do not show broken or unverified controls in main artist tabs.
+- Put debug/RDLA/internal controls in Advanced/Debug.
+- AOV tabs should expose only production-proven outputs.
+- Defaults should match Houdini 20.5 Generic/Native or MoonRay defaults unless deliberately changed.
+- No node creation Python errors.
+- No callback errors on missing camera/path.
+- No source/install drift between HDA UI and cook-time Python.
+
+Suggested grouping:
+
+- Output / Product.
+- Camera / Resolution.
+- Sampling.
+- Ray Depth / Path.
+- Lighting.
+- Volumes.
+- Filtering / Textures.
+- Clamping / Fireflies.
+- AOVs.
+- Advanced / Debug.
+
+## MoonRay Parameter Discovery
+
+Parameter discovery for this pass used Houdini 20.5 only. Houdini 21 behavior is intentionally out of scope.
+
+Sources inspected:
+
+- `/Applications/MoonRay/installs/openmoonray/coredata/SceneVariables.json`
+- `/Applications/MoonRay/installs/openmoonray/coredata/RenderOutput.json`
+- `/Applications/MoonRay/installs/openmoonray/plugin/houdini/soho/parameters/HdMoonrayRendererPlugin_Global.ds`
+- `moonray/hydra/hdMoonray/lib/hydramoonray/RenderSettings.cc`
+- `moonray/hydra/hdMoonray/lib/hydramoonray/RenderBuffer.cc`
+- `moonray/hydra/hdMoonray/lib/hydramoonray/RenderDelegate.cc`
+- `moonray/moonray_dcc_plugins/houdini/python3.11libs/moonray_render_settings.py`
+- The generated `Lop::DW_MOONRAY::moonrayrendersettings::1` parameter template.
+- Houdini 20.5 `rendersettings`, `karmarenderproperties`, `usdrender_rop`, and `usdrender` parameter templates through HOM.
+
+Inventory counts:
+
+- `SceneVariables.json`: 112 attributes.
+- `RenderOutput.json`: 37 attributes.
+- Current custom MoonRay Render Settings LOP: 50 curated SceneVariable parameters plus Beauty RenderVar authoring.
+
+Method:
+
+- Use `SceneVariables.json` as the authoritative MoonRay type/default/enum source for RDL `SceneVariables`.
+- Use `HdMoonrayRendererPlugin_Global.ds` as the Houdini 20.5 UI grouping/label/help source where it exposes global render settings.
+- Use `RenderSettings.cc` to prove the supported USD render-settings path: `moonray:sceneVariable:<name>` or `sceneVariable_<name>` on the RenderSettings prim, excluding `camera`, `motion_steps`, `enable_motion_blur`, `layer`, `image_width`, and `image_height`.
+- Use USD Render docs to decide whether a setting belongs on `RenderSettings`, `RenderProduct`, or `RenderVar`.
+- Use `RenderBuffer.cc` and `RenderOutput.json` to classify AOV/output settings but not expose non-beauty AOVs until production-filled buffers are proven.
+
+Important boundary:
+
+Not every MoonRay parameter belongs in this LOP. This node authors a Solaris render contract plus curated MoonRay global renderer settings. Geometry, light, camera-prim, and material/shader settings remain outside this node even if they use `moonray:*` names elsewhere.
+
+## Parameter Inventory
+
+This table is a summarized inventory of the parameters relevant to the MoonRay Render Settings LOP decision. The complete raw discovery set is the 112 `SceneVariables` plus 37 `RenderOutput` attributes listed in the metadata files above.
+
+| Source | Raw name | Label | Type | Default | Menu/range | Docs/help | MoonRay/RDL target | USD location | Current custom LOP status | Recommended UI status | Recommended tab | Notes |
+|--------|----------|-------|------|---------|------------|-----------|--------------------|--------------|---------------------------|-----------------------|-----------------|-------|
+| SceneVariables.json | `sampling_mode` | Sampling Mode | Int enum | `uniform=0` | `uniform=0`, `adaptive=2` | Controls uniform/adaptive sampling. | SceneVariables | RenderSettings prim | exposed/authored as token menu | expose main UI; keep H20.5 token/int validation note | Sampling | RDLA prints enum token; metadata type is Int. |
+| SceneVariables.json | `light_sampling_mode` | Light Sampling Mode | Int enum | `uniform=0` | `uniform=0`, `adaptive=1` | Controls light sampling scheme. | SceneVariables | RenderSettings prim | exposed/authored as token menu | expose main UI | Sampling | RDLA-proven in current prototype. |
+| SceneVariables.json | `light_sampling_quality` | Light Sampling Quality | Float | `0.5` | `0..1` artist range | Adaptive light sampling quality. | SceneVariables | RenderSettings prim | newly exposed | expose main UI | Sampling | Disabled unless Light Sampling Mode is adaptive. |
+| SceneVariables.json | `pixel_samples` | Pixel Samples | Int | `8` | positive int | Primary samples in uniform mode. | SceneVariables | RenderSettings prim | exposed | expose main UI | Sampling | Existing curated control. |
+| SceneVariables.json | `light_samples` | Light Samples | Int | `2` | positive int | Samples per light at primary intersection. | SceneVariables | RenderSettings prim | exposed | expose main UI | Sampling | Existing curated control. |
+| SceneVariables.json | `bsdf_samples` | BSDF Samples | Int | `2` | positive int | BSDF lobe samples. | SceneVariables | RenderSettings prim | exposed | expose main UI | Sampling | Existing curated control. |
+| SceneVariables.json | `bssrdf_samples` | BSSRDF Samples | Int | `2` | positive int | BSSRDF samples. | SceneVariables | RenderSettings prim | exposed | expose main UI | Sampling | Existing curated control. |
+| SceneVariables.json | `min_adaptive_samples` | Min Adaptive Samples | Int | `16` | positive int | Adaptive-only min samples. | SceneVariables | RenderSettings prim | exposed | expose main UI | Sampling | Disabled unless Sampling Mode is adaptive. |
+| SceneVariables.json | `max_adaptive_samples` | Max Adaptive Samples | Int | `4096` | positive int | Adaptive-only max samples. | SceneVariables | RenderSettings prim | exposed | expose main UI | Sampling | Disabled unless Sampling Mode is adaptive. |
+| SceneVariables.json | `target_adaptive_error` | Target Adaptive Error | Float | `10.0` | positive float | Adaptive target error. | SceneVariables | RenderSettings prim | exposed/RDLA-proven | expose main UI | Sampling | Keep float typed to avoid old long-long issue. |
+| SceneVariables.json | `lock_frame_noise` | Lock Frame Noise | Bool | `false` | toggle | Locks RNG seed across frames. | SceneVariables | RenderSettings prim | newly exposed | expose main UI | Sampling | Useful animation/render setting. |
+| SceneVariables.json | `batch_tile_order` | Batch Tile Order | Int enum | `morton=4` | tile order enum | Batch tile scheduling. | SceneVariables | RenderSettings prim | exposed/authored as token menu | expose main UI | Tile Order | RDLA enum tokens acceptable in current path. |
+| SceneVariables.json | `progressive_tile_order` | Progressive Tile Order | Int enum | `morton=4` | tile order enum | Progressive tile scheduling. | SceneVariables | RenderSettings prim | exposed/authored as token menu | expose main UI | Tile Order | Existing curated control. |
+| SceneVariables.json | `checkpoint_tile_order` | Checkpoint Tile Order | Int enum | `morton=4` | tile order enum | Checkpoint tile scheduling. | SceneVariables | RenderSettings prim | exposed/authored as token menu | expose main UI | Tile Order | Existing curated control; checkpoint controls otherwise deferred. |
+| SceneVariables.json | `max_depth` family | Max Ray Depth family | Int | metadata defaults | positive int | Ray/path depth limits. | SceneVariables | RenderSettings prim | exposed | expose main UI | Ray Depth / Path | Includes diffuse/glossy/mirror/presence/hair/volume. |
+| SceneVariables.json | `max_subsurface_per_path` | Max Subsurface Per Path | Int | `1` | positive int | Subsurface path limit. | SceneVariables | RenderSettings prim | exposed | expose main UI | Ray Depth / Path | Existing curated control. |
+| SceneVariables.json | `russian_roulette_threshold` | Russian Roulette Threshold | Float | `0.0375` | positive float | Path continuation threshold. | SceneVariables | RenderSettings prim | exposed | expose main UI | Ray Depth / Path | Existing curated control. |
+| SceneVariables.json | `transparency_threshold` | Transparency Threshold | Float | `1.0` | positive float | Transparency stop threshold. | SceneVariables | RenderSettings prim | exposed | expose main UI | Ray Depth / Path | Existing curated control. |
+| SceneVariables.json | `presence_threshold` | Presence Threshold | Float | `0.999` | positive float | Presence stop threshold. | SceneVariables | RenderSettings prim | exposed | expose main UI | Ray Depth / Path | Existing curated control. |
+| SceneVariables.json | `presence_quality` | Presence Quality | Float | `0.75` | positive float | Stochastic presence threshold. | SceneVariables | RenderSettings prim | exposed | expose main UI | Ray Depth / Path | Existing curated control. |
+| SceneVariables.json | `disable_optimized_hair_sampling` | Disable Optimized Hair Sampling | Bool | `false` | toggle | Forces independent hair BSDF lobe sampling. | SceneVariables | RenderSettings prim | newly exposed | expose Advanced | Advanced / Debug | Useful but not core artist first-pass. |
+| SceneVariables.json | `sample_clamping_value` | Sample Clamping Value | Float | `10.0` | positive float | Radiance sample clamp. | SceneVariables | RenderSettings prim | exposed | expose main UI | Clamping / Fireflies | Existing curated control. |
+| SceneVariables.json | `sample_clamping_depth` | Sample Clamping Depth | Int | `1` | positive int | Clamp after depth. | SceneVariables | RenderSettings prim | exposed | expose main UI | Clamping / Fireflies | Existing curated control. |
+| SceneVariables.json | `roughness_clamping_factor` | Roughness Clamping Factor | Float | `0.0` | `0..10` artist range | Indirect roughness clamp/firefly reduction. | SceneVariables | RenderSettings prim | exposed/RDLA-proven | expose main UI | Clamping / Fireflies | Mirrored from generic MoonRay tab. |
+| SceneVariables.json | `volume_*` curated group | Volume settings | Float/Int/enum | metadata defaults | metadata enums | Global volume quality/overlap/indirect settings. | SceneVariables | RenderSettings prim | exposed | expose main UI | Volumes | Artist-useful volume group only; deep output separate. |
+| SceneVariables.json | `texture_blur`, `pixel_filter_width`, `pixel_filter` | Filtering / Textures | Float/enum | metadata defaults | metadata enum | Texture/pixel filtering. | SceneVariables | RenderSettings prim | exposed | expose main UI | Filtering / Textures | Existing curated controls. |
+| SceneVariables.json | `enable_dof` | Enable DOF | Bool | `true` | toggle | Global DOF enable. | SceneVariables | RenderSettings prim | exposed/RDLA-proven | expose main UI | Global Toggles | Camera focus/aperture remain camera prim settings. |
+| SceneVariables.json | `enable_displacement`, `enable_subsurface_scattering`, `enable_shadowing`, `enable_presence_shadows`, `lights_visible_in_camera`, `propagate_visibility_bounce_type`, `shadow_terminator_fix` | Global toggles | Bool/enum | metadata defaults | metadata enum | Global production toggles. | SceneVariables | RenderSettings prim | exposed | expose main UI | Global Toggles | Keep curated; do not include all debug/internal toggles. |
+| SceneVariables.json | `image_width`, `image_height` | Image dimensions | Int | `1920`, `1080` | n/a | Image dimensions. | SceneVariables | do not author here | not exposed | do not include in this LOP | n/a | Excluded by `RenderSettings.cc`; use USD RenderSettings resolution. |
+| SceneVariables.json | `scene_scale` | Scene Scale | Float | `0.01` | n/a | World unit scale. | SceneVariables | do not author here | not exposed | document only | n/a | Unit-policy work deferred. |
+| SceneVariables.json | `enable_motion_blur`, `motion_steps`, `fps`, `slerp_xforms` | Motion blur settings | Bool/Float/Vector | metadata defaults | n/a | Motion sampling. | SceneVariables | unknown/special-case | hidden | hide/defer | n/a | `enable_motion_blur` and `motion_steps` are special-cased/excluded in hdMoonRay. |
+| SceneVariables.json | checkpoint/resume/deep settings | Checkpoint/deep output | mixed | metadata defaults | mixed | Output/deep/checkpoint internals. | SceneVariables | RenderSettings prim or output workflow | hidden | hide/defer | n/a | Needs separate render execution/deep/checkpoint pass. |
+| SceneVariables.json | `output_file`, `primary_aov` | MoonRay native output linkage | String/SceneObject* | metadata defaults | n/a | Native MoonRay output path/AOV linkage. | RenderOutput/SceneVariables | do not author here | hidden | do not include in this LOP | n/a | Use USD RenderProduct.productName and RenderVars. |
+| RenderOutput.json | `result`, `state_variable`, `material_aov`, `lpe`, `denoise`, `denoiser_input` | RenderOutput attrs | mixed | metadata defaults | metadata enums | AOV/output realization. | RenderOutput | RenderVar prim / backend output path | hidden except Beauty metadata | needs backend proof | AOVs | Non-beauty AOVs deferred. |
+| hdMoonRay delegate | `rdlOutput` | Debug RDL/RDLA Output | String | blank | file path | Debug scene export. | delegate/debug setting | delegate/debug setting | exposed debug-only | expose Debug | Advanced / Debug | Not final image output. |
+| Geometry prim attrs | `moonray:mesh_resolution` etc. | Geometry settings | mixed | n/a | n/a | Geometry tessellation/subdivision. | RDL geometry | geometry prim | not applicable | do not include in this LOP | n/a | Belongs to Render Geometry Settings. |
+| Light prim attrs | per-light `moonray:*` | Light settings | mixed | n/a | n/a | Per-light MoonRay attrs. | RDL light | light prim | not applicable | do not include in this LOP | n/a | Belongs to light-specific UI. |
+| Material/shader attrs | shader inputs | Material settings | mixed | n/a | n/a | Material behavior. | RDL material | material/shader prim | not applicable | do not include in this LOP | n/a | Belongs to material networks. |
+
+## Exposed Parameters
+
+Current exposed/custom-authored settings after discovery:
+
+| Tab | Label | Parm name | USD attr / relationship | USD type | Default | Source for type/default | Validation status |
+|-----|-------|-----------|-------------------------|----------|---------|-------------------------|------------------|
+| Output / Product | RenderSettings Primitive Path | `render_settings_prim` | RenderSettings prim path | path | `/Render/rendersettings` | H20.5 Generic/Karma pattern | validated previously |
+| Output / Product | RenderProducts Parent Primitive Path | `render_products_parent_prim` | RenderProduct parent path | path | `/Render/Products` | H20.5 Karma pattern | validated previously |
+| Output / Product | RenderVars Parent Primitive Path | `render_vars_parent_prim` | RenderVar parent path | path | `/Render/Products/Vars` | H20.5 Karma pattern | validated previously |
+| Output / Product | Output Picture | `product_name` | `RenderProduct.productName` | token | `$HIP/render/$HIPNAME.$OS.$F4.exr` | USD RenderProduct / H20.5 Karma pattern | validated previously |
+| Camera / Resolution | Camera | `camera` | `RenderSettings.camera` relationship | rel | `/cameras/camera1` | H20.5 Karma pattern | validated previously |
+| Camera / Resolution | Resolution Mode | `resolution_mode_note` | UI note only | n/a | Manual Resolution | H20.5 lifecycle cleanup decision | computed modes intentionally removed |
+| Camera / Resolution | Resolution | `resolution` | `RenderSettings.resolution` | `int2` | `1920, 1080` | USD RenderSettings | validated previously |
+| AOVs | Beauty | `aov_beauty` | `RenderProduct.orderedVars` + Beauty RenderVar | RenderVar | enabled | USD RenderVar + H20.5 generic parity | Beauty metadata validated; filled-pixel proof deferred |
+| Sampling | Sampling Mode | `sceneVariable_sampling_mode` | `moonray:sceneVariable:sampling_mode` | token-authored enum | `uniform` | SceneVariables metadata | RDLA token path proven for enum style |
+| Sampling | Light Sampling Mode | `sceneVariable_light_sampling_mode` | `moonray:sceneVariable:light_sampling_mode` | token-authored enum | `uniform` | SceneVariables metadata | RDLA-proven |
+| Sampling | Light Sampling Quality | `sceneVariable_light_sampling_quality` | `moonray:sceneVariable:light_sampling_quality` | float | `0.5` | SceneVariables metadata | newly added; needs RDLA validation |
+| Sampling | Pixel/Light/BSDF/BSSRDF Samples | `sceneVariable_*_samples` | `moonray:sceneVariable:*` | int | metadata defaults | SceneVariables metadata | validated previously for representative attrs |
+| Sampling | Min/Max Adaptive Samples, Target Adaptive Error | `sceneVariable_min_adaptive_samples`, etc. | `moonray:sceneVariable:*` | int/float | metadata defaults | SceneVariables metadata | validated previously for target error |
+| Sampling | Lock Frame Noise | `sceneVariable_lock_frame_noise` | `moonray:sceneVariable:lock_frame_noise` | bool | false | SceneVariables metadata | newly added; needs RDLA validation |
+| Tile Order | Batch/Progressive/Checkpoint Tile Order | `sceneVariable_*_tile_order` | `moonray:sceneVariable:*` | token-authored enum | `morton` | SceneVariables metadata | validated previously for authored attrs |
+| Ray Depth / Path | Ray depth/path controls | `sceneVariable_max_*`, thresholds | `moonray:sceneVariable:*` | int/float | metadata defaults | SceneVariables metadata | validated previously for representative attrs |
+| Clamping / Fireflies | Sample/Roughness clamps | `sceneVariable_sample_clamping_*`, `sceneVariable_roughness_clamping_factor` | `moonray:sceneVariable:*` | int/float | metadata defaults | SceneVariables metadata / generic MoonRay tab | roughness RDLA-proven |
+| Volumes | Volume group | `sceneVariable_volume_*` | `moonray:sceneVariable:*` | int/float/token | metadata defaults | SceneVariables metadata / Global.ds | authored; representative validation needed |
+| Filtering / Textures | Texture blur / pixel filter controls | `sceneVariable_texture_blur`, etc. | `moonray:sceneVariable:*` | float/token | metadata defaults | SceneVariables metadata / Global.ds | authored; representative validation needed |
+| Global Toggles | Production toggles | `sceneVariable_enable_*`, etc. | `moonray:sceneVariable:*` | bool/token | metadata defaults | SceneVariables metadata / Global.ds | `enable_dof` RDLA-proven |
+| Advanced / Debug | Disable Optimized Hair Sampling | `sceneVariable_disable_optimized_hair_sampling` | `moonray:sceneVariable:disable_optimized_hair_sampling` | bool | false | SceneVariables metadata | newly added; needs RDLA validation |
+| Advanced / Debug | Debug RDL/RDLA Output | `rdlOutput` | `rdlOutput` | string | blank | hdMoonRay delegate setting | validated previously |
+
+## Hidden / Deferred Parameters
+
+| Parameter/group | Reason | Correct authoring location | Future work |
+|-----------------|--------|----------------------------|-------------|
+| `image_width`, `image_height` | Excluded in hdMoonRay `RenderSettings.cc`; dimensions are driven by USD RenderSettings/Hydra framing. | `RenderSettings.resolution`, not `moonray:sceneVariable:*` | none for this LOP |
+| `scene_scale` | Unit policy is not settled; broad risk to lights, SSS, camera, materials. | renderer/unit-policy task | dedicated units pass |
+| `motion_steps`, `enable_motion_blur`, `fps`, `slerp_xforms` | hdMoonRay has special handling/exclusions; motion blur path not validated for this UI. | future motion blur/settings pass | audit and implement separately |
+| Checkpoint/resume settings | Execution/output behavior, not first-pass RenderSettings authoring. | future ROP/execution workflow | checkpoint pass |
+| Deep output settings | Deep output is AOV/output-system work. | future AOV/deep pass | defer |
+| Texture cache/file handles | Performance/cache policy and environment-sensitive. | Advanced only after validation | defer |
+| `output_file`, `primary_aov`, `two_stage_output` | Native MoonRay output wiring conflicts with USD RenderProduct model unless carefully designed. | RenderProduct/ROP/backend output design | defer |
+| `machine_id`, `num_machines`, `task_distribution_type`, `athena_debug` | Arras/internal/debug. | backend/Arras context | do not include |
+| `max_geometry_resolution`, `enable_max_geometry_resolution`, `fast_geometry_update` | Geometry/procedural behavior, not artist render contract. | geometry/procedural settings | document only |
+| Non-beauty RenderOutputs/AOVs | Production delegate filled-pixel proof missing. | RenderVar + backend AOV pipeline | future AOV pass |
+
+## Geometry / Camera / Light / Material Boundaries
+
+- `moonray:mesh_resolution` is geometry-level and must not be exposed in this Render Settings LOP.
+- Per-light MoonRay attributes belong on light prims or light-specific tooling.
+- Material/shader attributes belong in material networks.
+- Camera focal/aperture/focus settings belong on camera prims unless Houdini 20.5 native/generic behavior proves a different RenderSettings-level path.
+- The global `enable_dof` SceneVariable is included because it is a real SceneVariable and RDLA-proven through `moonray:sceneVariable:enable_dof`; it does not replace camera prim DOF controls.
+
+## Final Tab Architecture
+
+| Final tab | Purpose | Parameters to include | Parameters explicitly excluded | Notes |
+|----------|---------|-----------------------|-------------------------------|-------|
+| Output / Product | USD render contract and output path | RenderSettings path, products parent, vars parent, output picture, optional advanced product/beauty names | Native MoonRay `output_file`, `primary_aov` | RenderProduct.productName remains final image output source. |
+| Camera / Resolution | Render camera and offline resolution | Camera, manual resolution note, resolution | computed width/height modes, `image_width`, `image_height`, camera lens/focus attrs | Uses USD RenderSettings resolution and camera rel. |
+| Sampling | Main sampling controls | sampling mode, light sampling mode/quality, sample counts, adaptive controls, lock frame noise | unrelated debug RNG/internal controls | Adaptive controls disabled when inactive. |
+| Ray Depth / Path | Path limits and thresholds | max depth family, subsurface per path, russian roulette, transparency/presence threshold/quality | geometry resolution limits | SceneVariables only. |
+| Lighting | Global lighting behavior if it remains useful as a separate tab | currently no separate tab; light sampling lives in Sampling and lights visibility in Global Toggles | per-light attrs | Keep per-light UI elsewhere. |
+| Volumes | Global volume controls | volume quality/shadow/illumination/opacity/overlap/factors/indirect samples | deep output settings | Uses useful volume group from metadata/DS. |
+| Filtering / Textures | Texture/pixel filtering | texture blur, pixel filter width/type | texture cache/file handles for now | Cache controls deferred. |
+| Clamping / Fireflies | Firefly reduction | sample clamp value/depth, roughness clamping factor | none currently | Roughness clamp mirrored from generic MoonRay tab. |
+| AOVs | Artist AOV checkboxes | Beauty only | albedo/normal/depth/OIDN/Cryptomatte | Non-beauty hidden until production buffers are filled. |
+| Advanced / Debug | Troubleshooting/low-level controls | disable optimized hair sampling, debug RDL/RDLA output | Arras/internal/debug dumps | Keep sparse. |
+
+## What Still Remains
+
+- Non-beauty AOV backend payload work and filled-pixel validation.
+- Possible separate geometry settings LOP or expanded geometry tooling.
+- Possible light/material-specific UI passes.
+- Production filled Beauty proof, distinct from output-file smoke proof.
+- Install/runtime tooling to prevent HDA UI and cook-time Python drift.
+
+## HDA Lifecycle and Node Graph Mutation Policy
+
+The MoonRay Render Settings LOP has a small amount of node-graph automation: when the LOP is created, it creates a connected LOP `usdrender_rop` configured for `HdMoonrayRendererPlugin`. This lifecycle policy documents where node graph mutation is allowed and where it is forbidden.
+
+Validation target:
+
+```bash
+/Applications/Houdini/Houdini20.5.584/Frameworks/Houdini.framework/Versions/20.5/Resources/bin/hython \
+  /Applications/MoonRay/openmoonray/moonray/moonray_dcc_plugins/houdini/tests/dev_validate_moonray_render_settings_lop.py
+```
+
+Current validation summary:
+
+```text
+PASS=44
+FAIL=0
+SKIP=6
+```
+
+Skipped tests:
+
+- `raw_hom_copy_lop_only`: Houdini HOM copy of an existing node does not run `OnCreated`; press the repair button on the copied LOP.
+- `moonray_menu_tool_creation_path`: requires graphical Houdini 20.5 `hou.ui` interaction; hython cannot exercise the real MoonRay Tab/shelf UI path.
+- `digital_assets_creation_path`: requires graphical Houdini 20.5 Tab menu interaction; hython can report the operator definition but cannot click the Digital Assets entry.
+- `mixed_menu_path_two_node_sharing`: requires graphical Houdini 20.5 creation from both menu presentation paths.
+- `undo_redo_creation`: Hython does not provide a reliable UI undo/redo event test for this lifecycle; validate manually in Houdini UI if needed.
+- `rdla_scenevariable_receipt`: The optional RDLA smoke test timed out in the dev harness. This is not a lifecycle failure and should be rerun manually when render/RDLA timing is stable.
+
+### Python Entry Points
+
+| Entry point | File/location | When it runs | What it mutates | Safe? | Notes |
+|------------|---------------|--------------|-----------------|-------|-------|
+| HDA `OnCreated` | `Lop::DW_MOONRAY::moonrayrendersettings::1.hda` section `OnCreated` | Fresh MoonRay Render Settings LOP creation | Creates or updates one owned connected LOP `usdrender_rop` | Yes | Does not run on file load or HDA definition reload in H20.5 validation. |
+| `author_from_node()` | `houdini/python3.11libs/moonray_render_settings.py` | HDA Python cook/export | USD stage only | Yes | Must not create, delete, rename, or wire Houdini nodes. |
+| `create_or_update_usd_render_rop()` | `houdini/python3.11libs/moonray_render_settings.py` | HDA `OnCreated` and explicit repair button | Owned LOP `usdrender_rop` only | Yes | Idempotent; preserves unrelated ROPs. |
+| `resolution_mode_note` label | generated HDA parameter | Display only | Nothing | Yes | Computed resolution mode callbacks were removed; manual resolution only. |
+| resolution preset callback | generated HDA parameter tag | Resolution preset menu use | Resolution parameter values only | Yes | No ROP creation. |
+| `Create / Update USD Render ROP` button callback | generated HDA parameter tag | Explicit user button press | Owned LOP `usdrender_rop` only | Yes | Repair/update affordance. |
+| `MoonRayTools.shelf` tool | `houdini/toolbar/MoonRayTools.shelf` | Shelf/tab tool creation | Creates MoonRay Render Settings LOP via `loptoolutils.genericTool` | Yes | Shelf/tool behavior only; not cook-time behavior. |
+| Module import | `moonray_render_settings.py` | Python import | Nothing | Yes | Import-time code must remain side-effect free. |
+| `regenerate_hda()` | `moonray_render_settings.py` | Explicit developer regeneration | Creates temporary source node and HDA definition | Yes for dev only | Not a runtime artist action. |
+
+### Allowed Mutation Points
+
+- HDA `OnCreated` may create one owned LOP `usdrender_rop` for a fresh MoonRay Render Settings LOP.
+- The explicit `Create / Update USD Render ROP` button may create, repair, or reconnect the owned LOP `usdrender_rop`.
+- Shelf/tool creation may create the MoonRay Render Settings LOP through Houdini's `loptoolutils.genericTool`.
+
+### Forbidden Mutation Points
+
+- Cook/export must not create, delete, rename, connect, or rewire Houdini nodes.
+- Ordinary parameter changes must not create ROPs.
+- File load must not create extra ROPs.
+- HDA definition reload must not create extra ROPs.
+- Import-time code must not mutate the scene.
+- Unrelated user-created `usdrender_rop` nodes must never be overwritten.
+
+### Owned USD Render ROP Model
+
+The owned ROP is a LOP `usdrender_rop`, not an `/out/usdrender` node.
+
+Owned ROP values:
+
+```text
+renderer = HdMoonrayRendererPlugin
+loppath = <owning MoonRay Render Settings LOP path>
+rendersettings = /Render/rendersettings
+outputimage = ""
+```
+
+Ownership userData keys:
+
+```text
+moonray_render_settings_lop = <owning LOP path>
+moonray_render_settings_operator = Lop::DW_MOONRAY::moonrayrendersettings::1
+moonray_render_settings_lop_session_id = <owning LOP session id>
+```
+
+The helper uses the owner path, owner operator type, and session id to identify the owned ROP. The session id lets repair recover after renaming the owning LOP during the same Houdini session. A comment is also written on the ROP for human inspection.
+
+### Operator Registration / Menu Entry Policy
+
+Houdini 20.5 HOM sees one MoonRay Render Settings LOP operator definition:
+
+| Menu entry | Operator type | Label | Definition path | Source mechanism | Creates node type | Stale/duplicate? | Recommended action |
+|------------|---------------|-------|-----------------|------------------|-------------------|------------------|--------------------|
+| Digital Assets entry | `Lop::DW_MOONRAY::moonrayrendersettings::1` | MoonRay Render Settings | `/Applications/MoonRay/installs/openmoonray/plugin/houdini/otls/Lop::DW_MOONRAY::moonrayrendersettings::1.hda` | Houdini generic HDA fallback/category listing | Same operator type | Not a second definition | Document; do not delete. |
+| MoonRay shelf/tab entry | `Lop::DW_MOONRAY::moonrayrendersettings::1` | MoonRay Render Settings | same installed HDA path | `MoonRayTools.shelf` using `loptoolutils.genericTool` | Same operator type | Intended renderer-specific tool path | Keep. |
+
+The observed `Digital Assets` and `MoonRay` entries are menu presentation paths for the same installed operator definition, not two separate MoonRay Render Settings operators. Do not remove the generic Digital Assets entry blindly. Users should prefer the MoonRay shelf/tab entry, but both creation paths must create the same operator type and should be lifecycle-safe.
+
+Known installed/generated HDA paths observed during this work:
+
+```text
+/Applications/MoonRay/installs/openmoonray/plugin/houdini/otls/Lop::DW_MOONRAY::moonrayrendersettings::1.hda
+/Applications/MoonRay/source/openmoonray/moonray/moonray_dcc_plugins/houdini/otls/Lop::DW_MOONRAY::moonrayrendersettings::1.hda
+```
+
+The H20.5 validation runtime used the installed plugin HDA path.
+
+### USD Render ROP Initial Creation Policy
+
+Initial creation and the repair button use the same idempotent helper, `create_or_update_usd_render_rop()`.
+
+In graphical Houdini, `OnCreated` schedules only one deferred helper call through `hdefereval.executeDeferred`. The deferred pass exists because shelf/tool creation can finalize node naming, wiring, and placement after the HDA `OnCreated` hook starts. This avoids creating an incorrect intermediate ROP and then repairing it. The deferred call uses the same idempotent helper and the owning node session id, so it creates the final owned ROP in the same state as the explicit repair button. Hython does not provide `hdefereval`, so H20.5 command-line validation uses the immediate fallback path only.
+
+Manual graphical Houdini 20.5 validation is still required before claiming the MoonRay shelf/menu path and the Digital Assets menu path are fully fixed. The command-line harness proves direct HDA/HOM behavior and records UI-only creation paths as skipped, not passed.
+
+Expected initial creation behavior:
+
+- Create exactly one owned connected LOP `usdrender_rop`.
+- Connect it below the owning MoonRay Render Settings LOP.
+- Set `renderer = HdMoonrayRendererPlugin`.
+- Set `loppath` to the owning MoonRay Render Settings LOP path.
+- Set `rendersettings = /Render/rendersettings`.
+- Leave `outputimage` blank so `RenderProduct.productName` remains the output path source of truth.
+- Do not create `/out/usdrender`.
+- Do not overwrite unrelated `usdrender_rop` nodes.
+
+The repair button is only a repair/update affordance. It should not be required after normal creation. H20.5 hython validation confirms initial creation already matches repair behavior for direct HDA node creation; manual UI validation should still be used for shelf/menu presentation quirks.
+
+Current validation also confirms:
+
+- ROP graph comparisons include `moonray_render_settings_lop`, `moonray_render_settings_operator`, and `moonray_render_settings_lop_session_id`.
+- Two MoonRay Render Settings LOPs do not share the same owned `usdrender_rop`.
+- Only the Beauty AOV checkbox is visible in the current H20.5 UI.
+- Computed resolution mode parms and `loputils.computeResolutionParameter` / `loputils.updateResolutionParameters` callback references are absent.
+- `image_width` and `image_height` are absent from the curated `SCENE_VARIABLES` list and are not authored as custom USD SceneVariables.
+
+### Lifecycle Scenario Summary
+
+| Scenario | Result | Notes |
+|----------|--------|-------|
+| Create one MoonRay Render Settings LOP | PASS | One owned connected `usdrender_rop` is created. |
+| Click repair button twice | PASS | No duplicate ROPs. |
+| Initial graph equals post-repair graph | PASS | Direct HDA creation matches repair state, including placement. |
+| Create two MoonRay Render Settings LOPs | PASS | Two distinct owned ROPs. |
+| Settings nodes share one ROP | PASS | They do not share; each settings node owns one distinct ROP. |
+| Rename owning LOP, then repair | PASS | Owned ROP updates by session id. |
+| Rename owned `usdrender_rop`, then repair | PASS | Renamed ROP is preserved and updated in place. |
+| Delete owned `usdrender_rop`, then repair | PASS | Owned ROP is recreated. |
+| Disconnect owned `usdrender_rop`, then repair | PASS | Owned ROP is rewired. |
+| Raw HOM copy of LOP only | SKIP/limitation | `OnCreated` does not run for raw HOM copy; repair is required. |
+| Duplicate LOP+ROP pair | PASS with limitation | Non-destructive; copied ROP may have stale ownership until repair refreshes it. |
+| Unrelated colliding ROP | PASS | Existing unrelated Karma/usdrender ROP is preserved. |
+| Fake/stale ownership ROP | PASS | Stale/fake ROP is preserved; new owned ROP is created. |
+| Save/reopen file | PASS | No extra ROPs are created. |
+| HDA definition reload | PASS | No extra ROPs are created. |
+| Parameter change + cook | PASS | No node graph mutation. |
+| `/out/usdrender` creation | PASS | None created. |
+| MoonRay menu/tool path | SKIP | Requires graphical Houdini 20.5. |
+| Digital Assets menu path | SKIP | Requires graphical Houdini 20.5. |
+| One node from each menu path | SKIP | Requires graphical Houdini 20.5. |
+| Undo/redo | SKIP | Needs manual UI validation; not reliable in hython. |
+
+### MoonRayTools.shelf Justification
+
+The `MoonRayTools.shelf` change is intentional and should be kept. It updates shelf/tab creation behavior so the tool is available in LOP viewer/network contexts and creates the node with Houdini's `loptoolutils.genericTool`, matching Solaris tool conventions better than direct `kwargs["node"].createNode(...)`.
+
+This shelf change:
+
+- Affects shelf/tab creation only.
+- Is not cook-time behavior.
+- Is not backend/AOV behavior.
+- Is not responsible for `usdrender_rop` mutation during cook.
+
+### Known Accepted Limitations
+
+- Raw HOM copy/paste of only the MoonRay Render Settings LOP does not auto-create a ROP because `OnCreated` is not run; press the repair button.
+- Duplicating a LOP+ROP pair can leave stale ownership userData on the copied ROP until repair is pressed.
+- Undo/redo lifecycle behavior still needs manual UI validation.
+- MoonRay shelf/menu creation and Digital Assets menu creation still need real graphical Houdini 20.5 validation. Do not claim those menu paths are fully fixed from hython evidence alone.
+- These limitations are non-destructive and accepted for now.
+
+## Validation Checklist
+
+Future passes should validate:
+
+- [ ] Confirm Houdini 20.5 `hython` path.
+- [ ] Confirm Houdini 20.5 `husk` path.
+- [ ] Confirm `moonray_render_settings.__file__`.
+- [ ] Confirm SceneVariables count.
+- [ ] Confirm `enable_dof` is present.
+- [ ] Regenerate HDA from repo source.
+- [ ] Sync/install through a reproducible mechanism.
+- [ ] Export generic/native USD.
+- [ ] Export custom USD.
+- [ ] Diff RenderSettings/Product/Var.
+- [ ] Export RDLA.
+- [ ] Verify `enable_dof` in RDLA.
+- [ ] Verify `image_width` and `image_height` are not authored as USD SceneVariables.
+- [ ] Verify manual resolution.
+- [ ] Verify computed resolution modes remain removed.
+- [ ] Verify no computed resolution callback tags remain.
+- [ ] Verify USD Render ROP `renderer`, `loppath`, `rendersettings`, and `outputimage` wiring.
+- [ ] Verify RenderProduct `$F4` output path behavior.
+- [ ] Treat black/zero-filled renders as output-wiring evidence only, not filled-pixel Beauty/AOV proof.

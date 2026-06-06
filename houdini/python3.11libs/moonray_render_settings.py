@@ -16,11 +16,17 @@ RENDER_PRODUCT_NAME = "renderproduct"
 BEAUTY_RENDER_VAR_NAME = "beauty"
 PRODUCT_NAME = "$HIP/render/$HIPNAME.$OS.$F4.exr"
 DEFAULT_RESOLUTION = (1920, 1080)
+ROP_NODE_TYPE = "usdrender_rop"
+ROP_RENDERER_TOKEN = "HdMoonrayRendererPlugin"
+ROP_OWNER_LOP_KEY = "moonray_render_settings_lop"
+ROP_OWNER_OPERATOR_KEY = "moonray_render_settings_operator"
+ROP_OWNER_SESSION_KEY = "moonray_render_settings_lop_session_id"
 
 
 SCENE_VARIABLES = (
     ("sampling_mode", Sdf.ValueTypeNames.Token),
     ("light_sampling_mode", Sdf.ValueTypeNames.Token),
+    ("light_sampling_quality", Sdf.ValueTypeNames.Float),
     ("pixel_samples", Sdf.ValueTypeNames.Int),
     ("light_samples", Sdf.ValueTypeNames.Int),
     ("bsdf_samples", Sdf.ValueTypeNames.Int),
@@ -46,6 +52,8 @@ SCENE_VARIABLES = (
     ("transparency_threshold", Sdf.ValueTypeNames.Float),
     ("presence_threshold", Sdf.ValueTypeNames.Float),
     ("presence_quality", Sdf.ValueTypeNames.Float),
+    ("lock_frame_noise", Sdf.ValueTypeNames.Bool),
+    ("disable_optimized_hair_sampling", Sdf.ValueTypeNames.Bool),
     ("volume_quality", Sdf.ValueTypeNames.Float),
     ("volume_shadow_quality", Sdf.ValueTypeNames.Float),
     ("volume_illumination_samples", Sdf.ValueTypeNames.Int),
@@ -145,11 +153,27 @@ def author_from_node(node=None):
         beauty_var = UsdRender.Var.Define(stage, beauty_var_path)
         beauty_var.CreateDataTypeAttr().Set("color3f")
         beauty_var.CreateSourceNameAttr().Set("color")
+        beauty_var.CreateSourceTypeAttr().Set("raw")
         beauty_var.GetPrim().CreateAttribute(
             "driver:parameters:aov:name",
             Sdf.ValueTypeNames.String,
             custom=True,
         ).Set("color")
+        beauty_var.GetPrim().CreateAttribute(
+            "driver:parameters:aov:format",
+            Sdf.ValueTypeNames.Token,
+            custom=True,
+        ).Set("color3f")
+        beauty_var.GetPrim().CreateAttribute(
+            "driver:parameters:aov:multiSampled",
+            Sdf.ValueTypeNames.Bool,
+            custom=True,
+        ).Set(False)
+        beauty_var.GetPrim().CreateAttribute(
+            "driver:parameters:aov:clearValue",
+            Sdf.ValueTypeNames.Int,
+            custom=True,
+        ).Set(0)
         ordered_vars.append(beauty_var_path)
     _set_rel_targets(product, product.CreateOrderedVarsRel, ordered_vars)
 
@@ -179,6 +203,106 @@ def author_from_node(node=None):
             Sdf.ValueTypeNames.String,
             custom=True,
         ).Set(rdl_output)
+
+
+def _safe_node_name(name):
+    return "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in name)
+
+
+def _owned_rop_for_lop(lop_node):
+    parent = lop_node.parent()
+    if parent is None:
+        return None
+
+    lop_path = lop_node.path()
+    lop_session_id = str(lop_node.sessionId())
+    fallback_by_path = None
+    fallback_by_session = None
+    for rop in parent.children():
+        if rop.type().name() != ROP_NODE_TYPE:
+            continue
+        if rop.userData(ROP_OWNER_OPERATOR_KEY) != OPERATOR_TYPE:
+            continue
+        if rop.userData(ROP_OWNER_LOP_KEY) == lop_path:
+            return rop
+        if rop.userData(ROP_OWNER_SESSION_KEY) == lop_session_id:
+            fallback_by_session = rop
+        elif rop.parm("loppath") is not None and rop.parm("loppath").eval() == lop_path:
+            fallback_by_path = rop
+    return fallback_by_session or fallback_by_path
+
+
+def _create_owned_rop(lop_node):
+    parent = lop_node.parent()
+    if parent is None:
+        raise hou.OperationFailed("MoonRay Render Settings LOP has no parent network.")
+    base_name = _safe_node_name(lop_node.name() + "_usdrender")
+    existing = parent.node(base_name)
+    if existing is not None:
+        if (
+            existing.type().name() == ROP_NODE_TYPE
+            and existing.userData(ROP_OWNER_OPERATOR_KEY) == OPERATOR_TYPE
+            and existing.userData(ROP_OWNER_LOP_KEY) == lop_node.path()
+        ):
+            return existing
+        rop = parent.createNode(ROP_NODE_TYPE)
+        rop.setName(base_name, unique_name=True)
+        return rop
+    return parent.createNode(ROP_NODE_TYPE, base_name)
+
+
+def create_or_update_usd_render_rop(lop_node=None):
+    """Create or update the USD Render ROP owned by this MoonRay Render Settings LOP."""
+
+    lop_node = lop_node or hou.pwd()
+    rop = _owned_rop_for_lop(lop_node) or _create_owned_rop(lop_node)
+
+    settings_prim = _path(lop_node, "render_settings_prim", RENDER_SETTINGS_PRIM)
+    for parm_name, value in (
+        ("renderer", ROP_RENDERER_TOKEN),
+        ("loppath", lop_node.path()),
+        ("rendersettings", settings_prim),
+        ("outputimage", ""),
+    ):
+        parm = rop.parm(parm_name)
+        if parm is not None:
+            parm.set(value)
+
+    try:
+        rop.setInput(0, lop_node)
+    except hou.OperationFailed:
+        pass
+    try:
+        rop.setPosition(lop_node.position() + hou.Vector2(0, -1.0))
+    except hou.OperationFailed:
+        pass
+
+    rop.setUserData(ROP_OWNER_LOP_KEY, lop_node.path())
+    rop.setUserData(ROP_OWNER_OPERATOR_KEY, OPERATOR_TYPE)
+    rop.setUserData(ROP_OWNER_SESSION_KEY, str(lop_node.sessionId()))
+    rop.setComment("Owned by %s (%s)." % (lop_node.path(), OPERATOR_TYPE))
+    try:
+        rop.setGenericFlag(hou.nodeFlag.DisplayComment, True)
+    except hou.OperationFailed:
+        pass
+    return rop
+
+
+def _deferred_update_usd_render_rop(session_id):
+    node = hou.nodeBySessionId(session_id)
+    if node is not None and node.type().name() == OPERATOR_TYPE:
+        create_or_update_usd_render_rop(node)
+
+
+def on_created(kwargs):
+    node = kwargs.get("node")
+    if node is not None:
+        try:
+            import hdefereval
+
+            hdefereval.executeDeferred(_deferred_update_usd_render_rop, node.sessionId())
+        except Exception:
+            create_or_update_usd_render_rop(node)
 
 
 def _prim_path_tags(select_existing=False, input_index=None):
@@ -346,25 +470,13 @@ def _build_parm_template_group():
             input_index=0,
         )
     )
-    res_mode = hou.StringParmTemplate(
-        "res_mode",
-        "Resolution Mode",
-        1,
-        ("autoheight",),
-        string_type=hou.stringParmType.Regular,
-        help="Use the USD camera aperture aspect ratio to compute one resolution dimension, or set both dimensions manually.",
+    ptg.append(
+        _label(
+            "resolution_mode_note",
+            "Resolution Mode",
+            "Manual Resolution",
+        )
     )
-    res_mode.setItemGeneratorScript("menu = __import__('loputils').resolutionModeMenuItems()\nreturn menu")
-    res_mode.setItemGeneratorScriptLanguage(hou.scriptLanguage.Python)
-    res_mode.setMenuType(hou.menuType.Normal)
-    res_mode.setTags(
-        {
-            "export_disable": "1",
-            "script_callback": "__import__('loputils').updateResolutionParameters(hou.pwd(), True)",
-            "script_callback_language": "python",
-        }
-    )
-    ptg.append(res_mode)
     resolution = hou.IntParmTemplate(
         "resolution",
         "Resolution",
@@ -375,15 +487,6 @@ def _build_parm_template_group():
         max=8192,
         min_is_strict=True,
         help="Offline husk/USD renders use this resolution through RenderSettings. Viewport/IPR resolution is driven by the viewport.",
-    )
-    resolution.setDefaultExpression(
-        (
-            "",
-            'pythonexprf("__import__(\\\'loputils\\\').computeResolutionParameter(True, True)")',
-        )
-    )
-    resolution.setDefaultExpressionLanguage(
-        (hou.scriptLanguage.Hscript, hou.scriptLanguage.Hscript)
     )
     ptg.append(resolution)
     resolution_menu = hou.MenuParmTemplate(
@@ -421,6 +524,18 @@ def _build_parm_template_group():
             "Offline husk/USD renders use this RenderSettings resolution. Viewport/IPR resolution is driven by the viewport.",
         )
     )
+    update_rop = hou.ButtonParmTemplate(
+        "create_update_usd_render_rop",
+        "Create / Update USD Render ROP",
+        help="Create or repair the USD Render ROP owned by this MoonRay Render Settings LOP.",
+    )
+    update_rop.setTags(
+        {
+            "script_callback": "import moonray_render_settings\nmoonray_render_settings.create_or_update_usd_render_rop(hou.pwd())",
+            "script_callback_language": "python",
+        }
+    )
+    ptg.append(update_rop)
 
     aovs = (
         hou.ToggleParmTemplate(
@@ -504,6 +619,18 @@ def _build_parm_template_group():
             help_text="The square root of the number of samples taken to evaluate BSSRDF contributions on the primary intersection.",
         ),
     ]
+    light_sampling_quality = _scene_float(
+        "light_sampling_quality",
+        "Light Sampling Quality",
+        0.5,
+        max_value=1,
+        help_text="When the light sampling mode is adaptive, this controls how many lights are sampled per light sample, where 0.0 is low quality and 1.0 is high quality.",
+    )
+    light_sampling_quality.setConditional(
+        hou.parmCondType.DisableWhen,
+        "{ sceneVariable_light_sampling_mode != adaptive }",
+    )
+    sampling.insert(2, light_sampling_quality)
     adaptive_cond = "{ sceneVariable_sampling_mode != adaptive }"
     for name, label, default, help_text in (
         (
@@ -531,6 +658,14 @@ def _build_parm_template_group():
     )
     target_error.setConditional(hou.parmCondType.DisableWhen, adaptive_cond)
     sampling.append(target_error)
+    sampling.append(
+        _scene_toggle(
+            "lock_frame_noise",
+            "Lock Frame Noise",
+            False,
+            help_text="Use the same random seed from frame to frame instead of considering the frame number.",
+        )
+    )
 
     tile_order = (
         _scene_menu(
@@ -705,6 +840,12 @@ def _build_parm_template_group():
     )
 
     debug = (
+        _scene_toggle(
+            "disable_optimized_hair_sampling",
+            "Disable Optimized Hair Sampling",
+            False,
+            help_text="Forces all hair materials to sample each hair BSDF lobe independently. This is mainly useful for troubleshooting hair LPE label behavior.",
+        ),
         hou.StringParmTemplate(
             "rdlOutput",
             "Debug RDL/RDLA Output",
@@ -730,7 +871,7 @@ def _build_parm_template_group():
                 hou.FolderParmTemplate("volumes", "Volumes", volumes),
                 hou.FolderParmTemplate("filtering", "Filtering / Textures", filtering),
                 hou.FolderParmTemplate("global_toggles", "Global Toggles", global_toggles),
-                hou.FolderParmTemplate("debug", "Debug", debug),
+                hou.FolderParmTemplate("advanced_debug", "Advanced / Debug", debug),
             ),
             folder_type=hou.folderType.Tabs,
         )
@@ -768,6 +909,12 @@ def regenerate_hda(hda_path):
         "Authors an artist-friendly USD RenderSettings/RenderProduct setup and curated hdMoonRay moonray:sceneVariable settings."
     )
     definition.setParmTemplateGroup(_build_parm_template_group())
+    definition.addSection(
+        "OnCreated",
+        "import moonray_render_settings\n"
+        "moonray_render_settings.on_created(kwargs)\n",
+    )
+    definition.setExtraFileOption("OnCreated/IsPython", True)
     try:
         definition.setIcon("ROP_usdrender")
     except hou.OperationFailed:

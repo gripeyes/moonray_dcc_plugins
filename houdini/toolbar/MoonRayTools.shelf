@@ -20,12 +20,18 @@ moonray_material_builder.create_moonray_material_builder(kwargs)
   </tool>
   <tool name="moonrayrendersettings" label="MoonRay Render Settings" icon="ROP_usdrender">
     <helpText><![CDATA[Create a MoonRay Solaris Render Settings node that authors USD RenderSettings, RenderProduct, a beauty RenderVar, and hdMoonRay moonray:sceneVariable renderer settings.]]></helpText>
+    <toolMenuContext name="viewer">
+      <contextNetType>LOP</contextNetType>
+    </toolMenuContext>
     <toolMenuContext name="network">
-      <contextOpType>Lop/DW_MOONRAY::moonrayrendersettings::1</contextOpType>
+      <contextNetType>LOP</contextNetType>
     </toolMenuContext>
     <toolSubmenu>MoonRay</toolSubmenu>
     <script scriptType="python"><![CDATA[
-kwargs["node"].createNode("Lop::DW_MOONRAY::moonrayrendersettings::1", "moonrayrendersettings")
+import loptoolutils
+node = loptoolutils.genericTool(kwargs, "Lop::DW_MOONRAY::moonrayrendersettings::1", "moonrayrendersettings")
+node.setCurrent(True)
+node.setSelected(True)
 ]]></script>
     <keywordList>
       <keyword>MoonRay</keyword>
