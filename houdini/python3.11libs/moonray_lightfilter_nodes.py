@@ -17,6 +17,74 @@ import hou
 TEMPLATE_NODE = "kma_lfilter_attenuation"
 USD_LIGHTFILTER_EXTRA_INFO = "shadertype=lightfilter visibleoutputs=0 vopnetmask='usdlightfilter' "
 
+def toggle(name, label, default="0", help_text=""):
+    return {
+        "name": name,
+        "label": label,
+        "vop_type": "int",
+        "parm_type": "toggle",
+        "default": default,
+        "script_ritype": "int",
+        "help": help_text,
+    }
+
+
+def int_parm(name, label, default="0", value_range=None, help_text="", menu=None):
+    item = {
+        "name": name,
+        "label": label,
+        "vop_type": "int",
+        "parm_type": "integer",
+        "default": default,
+        "script_ritype": "int",
+        "help": help_text,
+    }
+    if value_range is not None:
+        item["range"] = value_range
+    if menu is not None:
+        item["menu"] = menu
+    return item
+
+
+def float_parm(name, label, default="0", value_range=None, help_text=""):
+    item = {
+        "name": name,
+        "label": label,
+        "vop_type": "float",
+        "parm_type": "float",
+        "default": default,
+        "script_ritype": "float",
+        "help": help_text,
+    }
+    if value_range is not None:
+        item["range"] = value_range
+    return item
+
+
+def color_parm(name, label, default=("1", "1", "1"), help_text=""):
+    return {
+        "name": name,
+        "label": label,
+        "vop_type": "vector",
+        "parm_type": "color",
+        "default": default,
+        "range": (0, 1),
+        "script_ritype": "color",
+        "help": help_text,
+    }
+
+
+def string_parm(name, label, default="", help_text=""):
+    return {
+        "name": name,
+        "label": label,
+        "vop_type": "string",
+        "parm_type": "string",
+        "default": default,
+        "script_ritype": "string",
+        "help": help_text,
+    }
+
 
 LIGHT_FILTERS = {
     "IntensityLightFilter": {
@@ -162,6 +230,174 @@ LIGHT_FILTERS = {
                 "script_ritype": "float",
                 "help": "distance from light to end of fade out",
             },
+        ],
+    },
+        "BarnDoorLightFilter": {
+        "label": "MoonRay Barn Door Light Filter",
+        "folder": ("barn_door_filter", "Barn Door Filter"),
+        "inputs": [
+            toggle("on", "On", "1", "Turns the light filter on or off."),
+            int_parm(
+                "projector_type",
+                "Projector Type",
+                "0",
+                menu=[
+                    ("0", "Perspective"),
+                    ("1", "Orthographic"),
+                ],
+                help_text="The projection type used to map points to the flap opening.",
+            ),
+            float_parm(
+                "projector_focal_distance",
+                "Projector Focal Distance",
+                "30",
+                (0, 100),
+                "Distance of the flap opening from the projector origin.",
+            ),
+            float_parm(
+                "projector_width",
+                "Projector Width",
+                "1",
+                (0, 100),
+                "Width of the flap opening.",
+            ),
+            float_parm(
+                "projector_height",
+                "Projector Height",
+                "1",
+                (0, 100),
+                "Height of the flap opening.",
+            ),
+            float_parm(
+                "edge_scale_top",
+                "Edge Scale Top",
+                "1",
+                (0, 10),
+                "Scale factor for the top edge.",
+            ),
+            float_parm(
+                "edge_scale_bottom",
+                "Edge Scale Bottom",
+                "1",
+                (0, 10),
+                "Scale factor for the bottom edge.",
+            ),
+            float_parm(
+                "edge_scale_left",
+                "Edge Scale Left",
+                "1",
+                (0, 10),
+                "Scale factor for the left edge.",
+            ),
+            float_parm(
+                "edge_scale_right",
+                "Edge Scale Right",
+                "1",
+                (0, 10),
+                "Scale factor for the right edge.",
+            ),
+            int_parm(
+                "pre_barn_mode",
+                "Pre Barn Mode",
+                "2",
+                menu=[
+                    ("0", "Black"),
+                    ("1", "White"),
+                    ("2", "Default"),
+                ],
+                help_text="Controls the region before the pre barn distance.",
+            ),
+            float_parm(
+                "pre_barn_distance",
+                "Pre Barn Distance",
+                "0.5",
+                (0, 100),
+                "Distance where the pre barn mode takes effect.",
+            ),
+            float_parm(
+                "density",
+                "Density",
+                "1",
+                (0, 1),
+                "Fades the filter effect.",
+            ),
+            toggle(
+                "invert",
+                "Invert",
+                "0",
+                "Swap application of the filter from inside to outside.",
+            ),
+            float_parm(
+                "radius",
+                "Radius",
+                "0",
+                (0, 1),
+                "Rounded box radius.",
+            ),
+            float_parm(
+                "edge",
+                "Edge",
+                "0",
+                (0, 1),
+                "Transition zone size.",
+            ),
+            int_parm(
+                "mode",
+                "Mode",
+                "0",
+                menu=[
+                    ("0", "Analytical"),
+                    ("1", "Physical"),
+                ],
+                help_text="Analytical or physical barn door mode.",
+            ),
+            float_parm(
+                "size_top",
+                "Size Top",
+                "0",
+                (-100, 100),
+                "Additional size on the top edge.",
+            ),
+            float_parm(
+                "size_bottom",
+                "Size Bottom",
+                "0",
+                (-100, 100),
+                "Additional size on the bottom edge.",
+            ),
+            float_parm(
+                "size_left",
+                "Size Left",
+                "0",
+                (-100, 100),
+                "Additional size on the left edge.",
+            ),
+            float_parm(
+                "size_right",
+                "Size Right",
+                "0",
+                (-100, 100),
+                "Additional size on the right edge.",
+            ),
+            toggle(
+                "use_light_xform",
+                "Use Light Xform",
+                "1",
+                "Attach the filter to the light and ignore node_xform.",
+            ),
+            float_parm(
+                "rotation",
+                "Rotation",
+                "0",
+                (-180, 180),
+                "Rotation around the focal direction, in degrees.",
+            ),
+            color_parm(
+                "color",
+                "Color",
+                ("1", "1", "1"),
+                "Color within the Barn Door lit region.",
+            ),
         ],
     },
 }
