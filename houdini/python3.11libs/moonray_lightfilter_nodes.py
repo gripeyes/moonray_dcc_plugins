@@ -14,7 +14,8 @@ from pathlib import Path
 import hou
 
 
-TEMPLATE_NODE = "pxrintmultlightfilter"
+TEMPLATE_NODE = "kma_lfilter_attenuation"
+USD_LIGHTFILTER_EXTRA_INFO = "shadertype=lightfilter visibleoutputs=0 vopnetmask='usdlightfilter' "
 
 
 LIGHT_FILTERS = {
@@ -287,24 +288,69 @@ def generate(output_dir: str | os.PathLike[str] | None = None) -> list[Path]:
     for class_name, spec in LIGHT_FILTERS.items():
         hda_name = f"Vop::DW_MOONRAY::{class_name}::1"
         hda_path = output_dir / f"{hda_name}.hda"
+
         if hda_path.exists():
             hda_path.unlink()
+
         template.definition().copyToHDAFile(
             str(hda_path),
             new_name=hda_name,
             new_menu_name=spec["label"],
         )
+
         hou.hda.installFile(str(hda_path))
         node_type = hou.nodeType(hou.vopNodeTypeCategory(), hda_name)
+
         if node_type is None or node_type.definition() is None:
             raise RuntimeError(f"Generated HDA did not register {hda_name}")
+
         definition = node_type.definition()
+
         definition.addSection("DialogScript", _dialog_script(class_name, spec))
         definition.addSection("TypePropertiesOptions", TYPE_OPTIONS)
         definition.addSection("Tools.shelf", TOOLS_SHELF)
+
+        # Critical for Solaris Light Filter Library visibility.
+        # The generated node must belong to the USD light-filter VOP context,
+        # not RIS / RenderMan.
+        definition.setExtraInfo(USD_LIGHTFILTER_EXTRA_INFO)
+
         definition.setDescription(spec["label"])
         definition.setIcon("NETWORKS/shop")
+
+        # Persist the edited definition into the HDA file.
+        definition.save(str(hda_path), create_backup=False)
+
+        # Reinstall/requery so validation checks the saved definition.
+        hou.hda.installFile(str(hda_path))
+        node_type = hou.nodeType(hou.vopNodeTypeCategory(), hda_name)
+
+        if node_type is None or node_type.definition() is None:
+            raise RuntimeError(f"Generated HDA disappeared after save: {hda_name}")
+
+        definition = node_type.definition()
+        mask = node_type.vopnetMask()
+        extra_info = definition.extraInfo()
+
+        if mask != "usdlightfilter":
+            raise RuntimeError(
+                f"{hda_name} has wrong vopnetMask {mask!r}; "
+                "expected 'usdlightfilter'"
+            )
+
+        if "risnet" in extra_info.lower():
+            raise RuntimeError(
+                f"{hda_name} still contains RIS extraInfo: {extra_info!r}"
+            )
+
+        if "shadertype=lightfilter" not in extra_info:
+            raise RuntimeError(
+                f"{hda_name} is missing shadertype=lightfilter extraInfo: "
+                f"{extra_info!r}"
+            )
+
         written.append(hda_path)
+
     return written
 
 
