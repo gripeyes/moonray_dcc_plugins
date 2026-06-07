@@ -87,6 +87,60 @@ def string_parm(name, label, default="", help_text=""):
     }
 
 
+def ramp_rgb_parm(
+    name,
+    label,
+    default_count="2",
+    value_type="color3f[]",
+    help_text="",
+    rampbasis_var=None,
+    rampkeys_var=None,
+    rampvalues_var=None,
+):
+    return {
+        "name": name,
+        "label": label,
+        "vop_type": None,
+        "parm_type": "ramp_rgb",
+        "default": default_count,
+        "script_ritype": "ramp_rgb",
+        "usdvaluetype": value_type,
+        "range": ("1!", "10"),
+        "help": help_text,
+        "ui_only": True,
+        "rampbasis_var": rampbasis_var,
+        "rampkeys_var": rampkeys_var,
+        "rampvalues_var": rampvalues_var,
+    }
+
+
+def ramp_float_parm(
+    name,
+    label,
+    default_count="2",
+    value_type="float[]",
+    help_text="",
+    rampbasis_var=None,
+    rampkeys_var=None,
+    rampvalues_var=None,
+):
+    return {
+        "name": name,
+        "label": label,
+        "vop_type": None,
+        "parm_type": "ramp_flt",
+        "default": default_count,
+        "script_ritype": "ramp_flt",
+        "usdvaluetype": value_type,
+        "range": ("1!", "10"),
+        "help": help_text,
+        "ui_only": True,
+        "rampbasis_var": rampbasis_var,
+        "rampkeys_var": rampkeys_var,
+        "rampvalues_var": rampvalues_var,
+    }
+
+
 LIGHT_FILTERS = {
     "IntensityLightFilter": {
         "label": "MoonRay Intensity Light Filter",
@@ -363,6 +417,16 @@ LIGHT_FILTERS = {
                 "1",
                 (0, 100),
                 "Where the ramp ends.",
+            ),
+            ramp_rgb_parm(
+                "ramp",
+                "Ramp",
+                "2",
+                "color3f[]",
+                "Color ramp used by the light filter.",
+                rampbasis_var="interpolation_types",
+                rampkeys_var="distances",
+                rampvalues_var="colors",
             ),
             float_parm(
                 "intensity",
@@ -658,6 +722,16 @@ LIGHT_FILTERS = {
             float_parm("intensity", "Intensity", "1", (0, 10), "Color intensity multiplier."),
             float_parm("density", "Density", "1", (0, 10), "Fades the filter effect."),
             toggle("invert", "Invert", "0", "Swap application from inside to outside."),
+            ramp_float_parm(
+                "ramp",
+                "Ramp",
+                "2",
+                "float[]",
+                "Distance remap ramp used by the rod filter.",
+                rampbasis_var="ramp_interpolation_types",
+                rampkeys_var="ramp_in_distances",
+                rampvalues_var="ramp_out_distances",
+            ),
         ],
     },
 
@@ -717,6 +791,16 @@ LIGHT_FILTERS = {
                 "Density Rescale Enable",
                 "0",
                 "Enable density rescaling.",
+            ),
+            ramp_float_parm(
+                "ramp",
+                "Ramp",
+                "2",
+                "float[]",
+                "Density remap ramp used by the VDB filter.",
+                rampbasis_var="density_remap_interpolation_types",
+                rampkeys_var="density_remap_inputs",
+                rampvalues_var="density_remap_outputs",
             ),
             color_parm("color_tint", "Color Tint", ("0", "0", "0"), "Color tint."),
             float_parm("blur_value", "Blur Value", "0", (0, 1000), "Blur radius."),
@@ -788,10 +872,20 @@ def _parm_dialog(input_def: dict) -> str:
         f"            name {_quote(input_def['name'])}",
         f"            label {_quote(input_def['label'])}",
         f"            type {input_def['parm_type']}",
-        f"            size {3 if input_def['parm_type'] == 'color' else 1}",
-        "            export none",
-        f"            default {{ {_default_values(input_def['default'])} }}",
     ]
+
+    if input_def["parm_type"] == "color":
+        lines.append("            size 3")
+    elif input_def["parm_type"] not in ("ramp_rgb", "ramp_flt"):
+        lines.append("            size 1")
+
+    lines.extend(
+        [
+            "            export none",
+            f"            default {{ {_default_values(input_def['default'])} }}",
+        ]
+    )
+
     if "range" in input_def:
         lo, hi = input_def["range"]
         lines.append(f"            range {{ {lo} {hi} }}")
@@ -802,20 +896,45 @@ def _parm_dialog(input_def: dict) -> str:
         lines.append("            }")
     if "help" in input_def:
         lines.append(f"            help {_quote(input_def['help'])}")
-    lines.append(f"            parmtag {{ script_ritype {_quote(input_def['script_ritype'])} }}")
+
+    if input_def.get("rampbasis_var"):
+        lines.append(
+            f"            parmtag {{ {_quote('rampbasis_var')} {_quote(input_def['rampbasis_var'])} }}"
+        )
+    if input_def.get("rampkeys_var"):
+        lines.append(
+            f"            parmtag {{ {_quote('rampkeys_var')} {_quote(input_def['rampkeys_var'])} }}"
+        )
+    if input_def.get("rampvalues_var"):
+        lines.append(
+            f"            parmtag {{ {_quote('rampvalues_var')} {_quote(input_def['rampvalues_var'])} }}"
+        )
+
+    if "usdvaluetype" in input_def:
+        lines.append(
+            f"            parmtag {{ {_quote('usdvaluetype')} {_quote(input_def['usdvaluetype'])} }}"
+        )
+    else:
+        lines.append(
+            f"            parmtag {{ {_quote('script_ritype')} {_quote(input_def['script_ritype'])} }}"
+        )
+
     lines.append("        }")
     return "\n".join(lines)
 
 
 def _dialog_script(class_name: str, spec: dict) -> str:
     folder_name, folder_label = spec["folder"]
+    vop_inputs = [item for item in spec["inputs"] if not item.get("ui_only")]
+
     input_lines = [
         f"    input {item['vop_type']} {item['name']} {_quote(item['label'])}"
-        for item in spec["inputs"]
+        for item in vop_inputs
     ]
-    input_flags = [f"    inputflags {item['name']} 0" for item in spec["inputs"]]
-    signature_types = " ".join(item["vop_type"] for item in spec["inputs"])
+    input_flags = [f"    inputflags {item['name']} 0" for item in vop_inputs]
+    signature_types = " ".join(item["vop_type"] for item in vop_inputs)
     parms = "\n".join(_parm_dialog(item) for item in spec["inputs"])
+
     return f"""# Dialog script for Vop::DW_MOONRAY::{class_name}::1 automatically generated
 {{
     name {_quote(f"Vop::DW_MOONRAY::{class_name}::1")}
