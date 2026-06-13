@@ -186,7 +186,7 @@ When the USD Render ROP `outputimage` override is blank, the RenderProduct outpu
 /tmp/moonray_render_settings_alignment_after/rop_product.0001.exr
 ```
 
-That smoke render was black. It proves USD Render ROP wiring, RenderProduct output creation, and resolution/output path behavior only. It does not prove filled-pixel Beauty/AOV success.
+That earlier smoke render was black, so it proved USD Render ROP wiring, RenderProduct output creation, and resolution/output path behavior only. The current H20.5 disk-output contract adds the default Beauty RenderVar/`orderedVars` path and has filled EXR proof; this evidence is scoped to Beauty and does not prove non-beauty AOV support.
 
 ## Generic Houdini Render Settings Boundary
 
@@ -245,7 +245,7 @@ The Render Settings LOP must not absorb every MoonRay or USD setting. Not every 
 | Area | Example | Correct USD location | USD kind | MoonRay/RDL target | Should this Render Settings LOP author it? | Correct authoring path | Status |
 |------|---------|----------------------|----------|--------------------|--------------------------------------------|------------------------|--------|
 | Render settings | pixel samples | RenderSettings prim | `moonray:sceneVariable:*` attr | SceneVariables | yes | custom Render Settings LOP | verify/working |
-| Render output/AOV | beauty/color | RenderProduct by default; optional RenderVar only when `aov_beauty` is enabled | UsdRenderProduct / optional UsdRenderVar | default beauty framebuffer / experimental RenderOutput path | only as Advanced/Debug diagnostic until render proof | Advanced / Debug experimental toggle | default no Beauty RenderVar |
+| Render output/AOV | beauty/color | RenderProduct plus Beauty RenderVar by default for H20.5 disk output | UsdRenderProduct / UsdRenderVar | Hydra color AOV mapped to MoonRay beauty framebuffer | yes for disk output beauty; diagnostic disable path only | Output / Product | default Beauty RenderVar |
 | Geometry settings | `moonray:mesh_resolution` | geometry prim | primvar or namespaced prim attr | RDL geometry setting | no | LOP wrangle / geometry settings node | document only |
 | Camera/DOF settings | DOF enable/focus/aperture depending on native behavior | camera prim or RenderSettings depending on proven path | camera attr or SceneVariable | Camera / SceneVariables | only if native path proves it | match H20.5 generic/native | audit |
 | Light settings | MoonRay light attrs | light prim | namespaced attrs | RDL light | no | light LOP / light-specific UI | document only |
@@ -256,13 +256,16 @@ Do not expose `moonray:mesh_resolution` in the Render Settings LOP as a global r
 
 ## Beauty RenderVar and AOV Status
 
-The default artist workflow does not author a Beauty RenderVar. It authors a RenderProduct with
-an empty `orderedVars` relationship and uses MoonRay's normal beauty framebuffer path.
+The H20.5 USD Render ROP / husk disk-output workflow now authors a Beauty RenderVar by default. A
+custom LOP export with `aov_beauty = 0`, `RenderProduct.productName`, `productType = "raster"`, and
+empty `orderedVars` failed in production `husk` with `No orderedVars to specify channels for
+/Render/Products/renderproduct`. The same scene with the Beauty RenderVar produced a filled,
+nonconstant EXR.
 
 Current default custom LOP contract:
 
-- `aov_beauty = 0`.
-- No authored Beauty RenderVar by default.
+- `aov_beauty = 1`.
+- Beauty RenderVar authored by default for disk output.
 - `UsdRender.Settings`.
 - `UsdRender.Product`.
 - `settings.products`.
@@ -270,16 +273,17 @@ Current default custom LOP contract:
 - `settings.resolution`.
 - `product.productName`.
 - `product.productType = "raster"`.
-- Empty `orderedVars`.
+- `orderedVars` targets `/Render/Products/Vars/beauty`.
 - Curated `moonray:sceneVariable:*`.
 
-The optional Beauty RenderVar path is preserved as an Advanced / Debug diagnostic toggle named
-`aov_beauty` for compatibility. It is disabled by default because H20.5 viewport/IPR testing showed
-the RenderVar/AOV binding path can start black until a viewport/display-options refresh.
+The Beauty control preserves the internal parameter name `aov_beauty` for compatibility. Its label is
+`Beauty RenderVar / Disk Output Path`, and it belongs with Render Product/output controls. Disabling
+it is a diagnostic viewport/default-framebuffer test path, not the production disk-output default.
 
-The UI label is `Experimental Beauty RenderVar / AOV Path`. The control belongs under Advanced / Debug or Experimental AOVs. This path is debug/experimental and is not production AOV support.
+This is not a claim of non-beauty AOV support. It is the minimal proven H20.5 disk-output beauty
+contract.
 
-Experimental custom Beauty RenderVar when `aov_beauty` is enabled:
+Custom Beauty RenderVar when `aov_beauty` is enabled:
 
 ```text
 Path: /Render/Products/Vars/beauty
@@ -308,7 +312,9 @@ Non-beauty AOV status:
 - Debug/local path filling non-beauty buffers is not enough for artist UI exposure.
 - If the production path produces zero-filled buffers, classify that as backend payload unresolved, not UI-ready.
 
-Do not recommend always authoring a Beauty RenderVar unless fresh viewport/IPR, USD Render ROP/husk, and filled image/EXR output prove it is required and stable.
+Do not remove the default Beauty RenderVar for the custom LOP disk-output path unless fresh H20.5
+viewport/IPR, USD Render ROP/husk, and filled image/EXR output prove a replacement contract. Do not
+extend this evidence to non-beauty AOVs.
 
 Do not claim AOV support from authored RenderVars, metadata, EXR channels, RDLA RenderOutput declarations, or debug renderer success alone.
 
@@ -439,7 +445,7 @@ Inventory counts:
 
 - `SceneVariables.json`: 112 attributes.
 - `RenderOutput.json`: 37 attributes.
-- Current custom MoonRay Render Settings LOP: 50 curated SceneVariable parameters plus default RenderProduct authoring. The optional Beauty RenderVar is disabled by default and lives under the Advanced / Debug experimental path.
+- Current custom MoonRay Render Settings LOP: 50 curated SceneVariable parameters plus default RenderSettings, RenderProduct, productName, productType, and Beauty RenderVar authoring for H20.5 disk output. The `aov_beauty` internal parameter is preserved; disabling it is diagnostic only.
 
 Method:
 
@@ -511,7 +517,7 @@ Current exposed/custom-authored settings after discovery:
 | Camera / Resolution | Camera | `camera` | `RenderSettings.camera` relationship | rel | `/cameras/camera1` | H20.5 Karma pattern | validated previously |
 | Camera / Resolution | Resolution Mode | `resolution_mode_note` | UI note only | n/a | Manual Resolution | H20.5 lifecycle cleanup decision | computed modes intentionally removed |
 | Camera / Resolution | Resolution | `resolution` | `RenderSettings.resolution` | `int2` | `1920, 1080` | USD RenderSettings | validated previously |
-| Advanced / Debug | Experimental Beauty RenderVar / AOV Path | `aov_beauty` | `RenderProduct.orderedVars` + Beauty RenderVar | RenderVar | disabled | H20.5 runtime evidence | Debug metadata validated; filled-pixel proof required before default use |
+| Output / Product | Beauty RenderVar / Disk Output Path | `aov_beauty` | `RenderProduct.orderedVars` + Beauty RenderVar | RenderVar | enabled | H20.5 `husk`/EXR evidence | Default disk-output path validated; disabled state is diagnostic only |
 | Sampling | Sampling Mode | `sceneVariable_sampling_mode` | `moonray:sceneVariable:sampling_mode` | token-authored enum | `uniform` | SceneVariables metadata | RDLA token path proven for enum style |
 | Sampling | Light Sampling Mode | `sceneVariable_light_sampling_mode` | `moonray:sceneVariable:light_sampling_mode` | token-authored enum | `uniform` | SceneVariables metadata | RDLA-proven |
 | Sampling | Light Sampling Quality | `sceneVariable_light_sampling_quality` | `moonray:sceneVariable:light_sampling_quality` | float | `0.5` | SceneVariables metadata | newly added; needs RDLA validation |
@@ -563,7 +569,7 @@ Current exposed/custom-authored settings after discovery:
 | Filtering / Textures | Texture/pixel filtering | texture blur, pixel filter width/type | texture cache/file handles for now | Cache controls deferred. |
 | Clamping / Fireflies | Firefly reduction | sample clamp value/depth, roughness clamping factor | none currently | Roughness clamp mirrored from generic MoonRay tab. |
 | AOVs | Artist AOV checkboxes | none | beauty/albedo/normal/depth/OIDN/Cryptomatte | No production AOV tab until buffers are proven. |
-| Advanced / Debug | Troubleshooting/low-level controls | disable optimized hair sampling, debug RDL/RDLA output, experimental Beauty RenderVar toggle | Arras/internal/debug dumps and production AOV UI | Keep sparse. |
+| Advanced / Debug | Troubleshooting/low-level controls | disable optimized hair sampling, debug RDL/RDLA output | Arras/internal/debug dumps, production AOV UI, and default Beauty disk-output controls | Keep sparse. |
 
 ## What Still Remains
 
@@ -698,7 +704,7 @@ Current validation also confirms:
 
 - ROP graph comparisons include `moonray_render_settings_lop`, `moonray_render_settings_operator`, and `moonray_render_settings_lop_session_id`.
 - Two MoonRay Render Settings LOPs do not share the same owned `usdrender_rop`.
-- Only the Beauty AOV checkbox is visible in the current H20.5 UI.
+- Only the Beauty RenderVar disk-output toggle is visible in the current H20.5 UI; non-beauty production AOV controls remain hidden/deferred.
 - Computed resolution mode parms and `loputils.computeResolutionParameter` / `loputils.updateResolutionParameters` callback references are absent.
 - `image_width` and `image_height` are absent from the curated `SCENE_VARIABLES` list and are not authored as custom USD SceneVariables.
 
@@ -759,8 +765,8 @@ Future passes should validate:
 - [ ] Regenerate HDA from repo source.
 - [ ] Sync/install through a reproducible mechanism.
 - [ ] Launch a fresh normal Houdini 20.5 GUI session after install sync.
-- [ ] Confirm fresh GUI custom LOP defaults `aov_beauty` off and labels it experimental.
-- [ ] Confirm fresh GUI custom LOP viewport/IPR renders with default Beauty RenderVar disabled.
+- [ ] Confirm fresh GUI custom LOP defaults `aov_beauty` on and labels it `Beauty RenderVar / Disk Output Path`.
+- [ ] Confirm fresh GUI custom LOP viewport/IPR and USD Render ROP render with the default Beauty RenderVar enabled.
 - [ ] Export generic/native USD.
 - [ ] Export custom USD.
 - [ ] Diff RenderSettings/Product/Var.

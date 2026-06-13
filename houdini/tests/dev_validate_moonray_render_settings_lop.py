@@ -318,13 +318,13 @@ def test_resolution_and_usd_contract() -> None:
         if parm.name().startswith("aov_")
         and parm.parmTemplate().type() == hou.parmTemplateType.Toggle
     )
-    check("experimental_beauty_internal_name_preserved", aov_toggles == ["aov_beauty"], aov_toggles)
+    check("beauty_internal_name_preserved", aov_toggles == ["aov_beauty"], aov_toggles)
     beauty = node.parm("aov_beauty")
     beauty_template = beauty.parmTemplate() if beauty is not None else None
-    check("experimental_beauty_default_off", beauty is not None and not bool(beauty.eval()), beauty.eval() if beauty is not None else None)
+    check("beauty_default_on_for_disk_output", beauty is not None and bool(beauty.eval()), beauty.eval() if beauty is not None else None)
     check(
-        "experimental_beauty_label",
-        beauty_template is not None and beauty_template.label() == "Experimental Beauty RenderVar / AOV Path",
+        "beauty_disk_output_label",
+        beauty_template is not None and beauty_template.label() == "Beauty RenderVar / Disk Output Path",
         beauty_template.label() if beauty_template is not None else None,
     )
     check("production_aov_folder_removed", '"aovs"' not in ptg_text, "no production AOV folder token")
@@ -342,9 +342,9 @@ def test_resolution_and_usd_contract() -> None:
     default_checks = {
         "RenderSettings": 'def RenderSettings "rendersettings"' in text,
         "RenderProduct": 'def RenderProduct "renderproduct"' in text,
-        "no_RenderVar_by_default": 'def RenderVar "beauty"' not in text,
+        "RenderVar_by_default": 'def RenderVar "beauty"' in text,
         "products_rel": 'rel products = </Render/Products/renderproduct>' in text,
-        "empty_orderedVars_by_default": 'rel orderedVars' in text and 'rel orderedVars = </Render/Products/Vars/beauty>' not in text,
+        "orderedVars_by_default": 'rel orderedVars = </Render/Products/Vars/beauty>' in text,
         "camera_rel": 'rel camera = </cameras/camera1>' in text,
         "resolution": 'uniform int2 resolution = (512, 256)' in text,
         "no_custom_image_width": 'moonray:sceneVariable:image_width' not in text,
@@ -352,6 +352,18 @@ def test_resolution_and_usd_contract() -> None:
     }
     for test_name, ok in default_checks.items():
         check("usd_default_contract_" + test_name, ok, usd_path)
+
+    node.parm("aov_beauty").set(0)
+    node.cook(force=True)
+    diagnostic_usd_path = os.path.join(tempfile.gettempdir(), "moonray_render_settings_lifecycle_validation_no_beauty.usda")
+    node.stage().Flatten().Export(diagnostic_usd_path)
+    diagnostic_text = open(diagnostic_usd_path, "r", encoding="utf-8").read()
+    diagnostic_checks = {
+        "no_RenderVar_when_disabled": 'def RenderVar "beauty"' not in diagnostic_text,
+        "empty_orderedVars_when_disabled": 'rel orderedVars' in diagnostic_text and 'rel orderedVars = </Render/Products/Vars/beauty>' not in diagnostic_text,
+    }
+    for test_name, ok in diagnostic_checks.items():
+        check("usd_diagnostic_no_beauty_contract_" + test_name, ok, diagnostic_usd_path)
 
     node.parm("aov_beauty").set(1)
     node.cook(force=True)
