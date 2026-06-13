@@ -318,7 +318,16 @@ def test_resolution_and_usd_contract() -> None:
         if parm.name().startswith("aov_")
         and parm.parmTemplate().type() == hou.parmTemplateType.Toggle
     )
-    check("beauty_only_aov_ui", aov_toggles == ["aov_beauty"], aov_toggles)
+    check("experimental_beauty_internal_name_preserved", aov_toggles == ["aov_beauty"], aov_toggles)
+    beauty = node.parm("aov_beauty")
+    beauty_template = beauty.parmTemplate() if beauty is not None else None
+    check("experimental_beauty_default_off", beauty is not None and not bool(beauty.eval()), beauty.eval() if beauty is not None else None)
+    check(
+        "experimental_beauty_label",
+        beauty_template is not None and beauty_template.label() == "Experimental Beauty RenderVar / AOV Path",
+        beauty_template.label() if beauty_template is not None else None,
+    )
+    check("production_aov_folder_removed", '"aovs"' not in ptg_text, "no production AOV folder token")
 
     node.parm("camera").set("/cameras/camera1")
     node.parm("resolutionx").set(512)
@@ -330,24 +339,36 @@ def test_resolution_and_usd_contract() -> None:
     usd_path = os.path.join(tempfile.gettempdir(), "moonray_render_settings_lifecycle_validation.usda")
     node.stage().Flatten().Export(usd_path)
     text = open(usd_path, "r", encoding="utf-8").read()
-    checks = {
+    default_checks = {
         "RenderSettings": 'def RenderSettings "rendersettings"' in text,
         "RenderProduct": 'def RenderProduct "renderproduct"' in text,
-        "RenderVar": 'def RenderVar "beauty"' in text,
+        "no_RenderVar_by_default": 'def RenderVar "beauty"' not in text,
         "products_rel": 'rel products = </Render/Products/renderproduct>' in text,
-        "orderedVars_rel": 'rel orderedVars = </Render/Products/Vars/beauty>' in text,
+        "empty_orderedVars_by_default": 'rel orderedVars' in text and 'rel orderedVars = </Render/Products/Vars/beauty>' not in text,
         "camera_rel": 'rel camera = </cameras/camera1>' in text,
         "resolution": 'uniform int2 resolution = (512, 256)' in text,
-        "beauty_sourceType": 'uniform token sourceType = "raw"' in text,
-        "beauty_format": 'driver:parameters:aov:format = "color3f"' in text,
-        "beauty_multiSampled": 'driver:parameters:aov:multiSampled = 0' in text,
-        "beauty_clearValue": 'driver:parameters:aov:clearValue = 0' in text,
-        "beauty_only_orderedVars": text.count("rel orderedVars = </Render/Products/Vars/beauty>") == 1,
         "no_custom_image_width": 'moonray:sceneVariable:image_width' not in text,
         "no_custom_image_height": 'moonray:sceneVariable:image_height' not in text,
     }
-    for test_name, ok in checks.items():
-        check("usd_contract_" + test_name, ok, usd_path)
+    for test_name, ok in default_checks.items():
+        check("usd_default_contract_" + test_name, ok, usd_path)
+
+    node.parm("aov_beauty").set(1)
+    node.cook(force=True)
+    debug_usd_path = os.path.join(tempfile.gettempdir(), "moonray_render_settings_lifecycle_validation_debug_beauty.usda")
+    node.stage().Flatten().Export(debug_usd_path)
+    debug_text = open(debug_usd_path, "r", encoding="utf-8").read()
+    debug_checks = {
+        "RenderVar_when_enabled": 'def RenderVar "beauty"' in debug_text,
+        "orderedVars_when_enabled": 'rel orderedVars = </Render/Products/Vars/beauty>' in debug_text,
+        "beauty_sourceType": 'uniform token sourceType = "raw"' in debug_text,
+        "beauty_format": 'driver:parameters:aov:format = "color3f"' in debug_text,
+        "beauty_multiSampled": 'driver:parameters:aov:multiSampled = 0' in debug_text,
+        "beauty_clearValue": 'driver:parameters:aov:clearValue = 0' in debug_text,
+        "beauty_only_orderedVars": debug_text.count("rel orderedVars = </Render/Products/Vars/beauty>") == 1,
+    }
+    for test_name, ok in debug_checks.items():
+        check("usd_debug_beauty_contract_" + test_name, ok, debug_usd_path)
 
 def test_rdla_receipt() -> None:
     # RDLA export is practical but can be slow; use a tiny lit fixture and a timeout.

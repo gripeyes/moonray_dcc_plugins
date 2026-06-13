@@ -119,7 +119,7 @@ def _bool_parm(node, name, default=False):
 
 
 def author_from_node(node=None):
-    """Author USD RenderSettings, RenderProduct, beauty RenderVar, and MoonRay settings."""
+    """Author USD RenderSettings, RenderProduct, optional beauty RenderVar, and MoonRay settings."""
 
     node = node or hou.pwd()
     stage = node.editableStage()
@@ -149,7 +149,7 @@ def author_from_node(node=None):
     product.CreateProductTypeAttr().Set("raster")
 
     ordered_vars = []
-    if _bool_parm(node, "aov_beauty", True):
+    if _bool_parm(node, "aov_beauty", False):
         beauty_var = UsdRender.Var.Define(stage, beauty_var_path)
         beauty_var.CreateDataTypeAttr().Set("color3f")
         beauty_var.CreateSourceNameAttr().Set("color")
@@ -537,17 +537,17 @@ def _build_parm_template_group():
     )
     ptg.append(update_rop)
 
-    aovs = (
+    experimental_aovs = (
         hou.ToggleParmTemplate(
             "aov_beauty",
-            "Beauty",
-            default_value=True,
-            help="Author the primary beauty RenderVar. Additional AOV checkboxes are deferred until the main MoonRay delegate fills non-beauty AOV buffers reliably.",
+            "Experimental Beauty RenderVar / AOV Path",
+            default_value=False,
+            help="Advanced diagnostic toggle. Author a Beauty RenderVar and route beauty through Houdini/Hydra AOV binding. Leave disabled for the default artist beauty path.",
         ),
         _label(
-            "aov_deferred_note",
-            "Deferred AOVs",
-            "Albedo, normal, geometric normal, depth, motion vectors, and OIDN helper AOVs are verified in MoonRay's local/debug path but remain hidden here until the main HdMoonrayRendererPlugin fills those buffers through USD Render ROP.",
+            "experimental_aov_note",
+            "AOV Status",
+            "Non-beauty AOVs and this Beauty RenderVar path are experimental until the production MoonRay delegate fills buffers reliably in fresh H20.5 viewport/IPR and USD Render ROP renders.",
         ),
     )
 
@@ -569,7 +569,7 @@ def _build_parm_template_group():
         _label(
             "beauty_note",
             "Beauty Output",
-            "Derived paths: RenderProduct under the RenderProducts parent and beauty RenderVar under the RenderVars parent. AOV and Cryptomatte controls beyond beauty are deferred.",
+            "Default beauty uses the RenderProduct output path without an authored RenderVar. The optional Beauty RenderVar path lives in Advanced / Debug for diagnostics.",
         ),
     )
 
@@ -862,7 +862,6 @@ def _build_parm_template_group():
             "moonray_settings",
             "MoonRay Render Settings",
             (
-                hou.FolderParmTemplate("aovs", "AOVs", aovs),
                 hou.FolderParmTemplate("render_product", "Render Product", render_product),
                 hou.FolderParmTemplate("sampling", "Sampling", sampling),
                 hou.FolderParmTemplate("tile_order", "Tile Order", tile_order),
@@ -871,7 +870,11 @@ def _build_parm_template_group():
                 hou.FolderParmTemplate("volumes", "Volumes", volumes),
                 hou.FolderParmTemplate("filtering", "Filtering / Textures", filtering),
                 hou.FolderParmTemplate("global_toggles", "Global Toggles", global_toggles),
-                hou.FolderParmTemplate("advanced_debug", "Advanced / Debug", debug),
+                hou.FolderParmTemplate(
+                    "advanced_debug",
+                    "Advanced / Debug",
+                    tuple(debug) + (hou.FolderParmTemplate("experimental_aovs", "Experimental AOVs", experimental_aovs),),
+                ),
             ),
             folder_type=hou.folderType.Tabs,
         )
