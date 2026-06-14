@@ -23,6 +23,82 @@ ROP_OWNER_OPERATOR_KEY = "moonray_render_settings_operator"
 ROP_OWNER_SESSION_KEY = "moonray_render_settings_lop_session_id"
 
 
+AOV_DEFINITIONS = (
+    {
+        "parm": "aov_alpha",
+        "label": "Alpha",
+        "render_var": "alpha",
+        "source_name": "alpha",
+        "data_type": "float",
+        "help": "MoonRay alpha RenderOutput. Production-tested as a native single-channel AOV.",
+    },
+    {
+        "parm": "aov_depth",
+        "label": "Depth",
+        "render_var": "depth",
+        "source_name": "depth",
+        "data_type": "float",
+        "help": "MoonRay depth RenderOutput. In hdMoonray this follows the existing depth mapping.",
+    },
+    {
+        "parm": "aov_z",
+        "label": "Z",
+        "render_var": "Z",
+        "source_name": "Z",
+        "data_type": "float",
+        "help": "MoonRay state-variable depth through the existing Z mapping.",
+    },
+    {
+        "parm": "aov_n",
+        "label": "N",
+        "render_var": "N",
+        "source_name": "N",
+        "data_type": "normal3f",
+        "help": "MoonRay shading normal state variable.",
+    },
+    {
+        "parm": "aov_ng",
+        "label": "Ng",
+        "render_var": "Ng",
+        "source_name": "Ng",
+        "data_type": "normal3f",
+        "help": "MoonRay geometric normal state variable.",
+    },
+    {
+        "parm": "aov_p",
+        "label": "P",
+        "render_var": "P",
+        "source_name": "P",
+        "data_type": "point3f",
+        "help": "MoonRay position state variable.",
+    },
+    {
+        "parm": "aov_wp",
+        "label": "Wp",
+        "render_var": "Wp",
+        "source_name": "Wp",
+        "data_type": "point3f",
+        "help": "MoonRay world-position state variable.",
+    },
+    {
+        "parm": "aov_st",
+        "label": "St",
+        "render_var": "St",
+        "source_name": "St",
+        "data_type": "float2",
+        "help": "MoonRay texture-coordinate state variable.",
+    },
+    {
+        "parm": "aov_weight",
+        "label": "Weight",
+        "render_var": "weight",
+        "source_name": "weight",
+        "data_type": "float",
+        "help": "MoonRay weight RenderOutput. Existing production proof showed a constant sample-count value in the simple fixture.",
+    },
+)
+
+
 SCENE_VARIABLES = (
     ("sampling_mode", Sdf.ValueTypeNames.Token),
     ("light_sampling_mode", Sdf.ValueTypeNames.Token),
@@ -111,6 +187,35 @@ def _set_rel_targets(schema_obj, create_rel, paths):
     return rel
 
 
+def _define_render_var(stage, path, data_type, source_name, source_type="raw"):
+    render_var = UsdRender.Var.Define(stage, path)
+    render_var.CreateDataTypeAttr().Set(data_type)
+    render_var.CreateSourceNameAttr().Set(source_name)
+    render_var.CreateSourceTypeAttr().Set(source_type)
+    prim = render_var.GetPrim()
+    prim.CreateAttribute(
+        "driver:parameters:aov:name",
+        Sdf.ValueTypeNames.String,
+        custom=True,
+    ).Set(source_name)
+    prim.CreateAttribute(
+        "driver:parameters:aov:format",
+        Sdf.ValueTypeNames.Token,
+        custom=True,
+    ).Set(data_type)
+    prim.CreateAttribute(
+        "driver:parameters:aov:multiSampled",
+        Sdf.ValueTypeNames.Bool,
+        custom=True,
+    ).Set(False)
+    prim.CreateAttribute(
+        "driver:parameters:aov:clearValue",
+        Sdf.ValueTypeNames.Int,
+        custom=True,
+    ).Set(0)
+    return render_var
+
+
 def _bool_parm(node, name, default=False):
     parm = node.parm(name)
     if parm is None:
@@ -150,31 +255,14 @@ def author_from_node(node=None):
 
     ordered_vars = []
     if _bool_parm(node, "aov_beauty", True):
-        beauty_var = UsdRender.Var.Define(stage, beauty_var_path)
-        beauty_var.CreateDataTypeAttr().Set("color3f")
-        beauty_var.CreateSourceNameAttr().Set("color")
-        beauty_var.CreateSourceTypeAttr().Set("raw")
-        beauty_var.GetPrim().CreateAttribute(
-            "driver:parameters:aov:name",
-            Sdf.ValueTypeNames.String,
-            custom=True,
-        ).Set("color")
-        beauty_var.GetPrim().CreateAttribute(
-            "driver:parameters:aov:format",
-            Sdf.ValueTypeNames.Token,
-            custom=True,
-        ).Set("color3f")
-        beauty_var.GetPrim().CreateAttribute(
-            "driver:parameters:aov:multiSampled",
-            Sdf.ValueTypeNames.Bool,
-            custom=True,
-        ).Set(False)
-        beauty_var.GetPrim().CreateAttribute(
-            "driver:parameters:aov:clearValue",
-            Sdf.ValueTypeNames.Int,
-            custom=True,
-        ).Set(0)
+        _define_render_var(stage, beauty_var_path, "color4f", "color")
         ordered_vars.append(beauty_var_path)
+    for aov in AOV_DEFINITIONS:
+        if not _bool_parm(node, aov["parm"], False):
+            continue
+        aov_path = _child_path(vars_parent_path, aov["render_var"])
+        _define_render_var(stage, aov_path, aov["data_type"], aov["source_name"])
+        ordered_vars.append(aov_path)
     _set_rel_targets(product, product.CreateOrderedVarsRel, ordered_vars)
 
     settings_prim = settings.GetPrim()
@@ -578,7 +666,7 @@ def _build_parm_template_group():
         _label(
             "experimental_aov_note",
             "AOV Status",
-            "Non-beauty AOVs remain hidden until the production MoonRay delegate fills those buffers reliably in fresh H20.5 viewport/IPR and USD Render ROP renders.",
+            "The AOV tab exposes only native RenderBuffer mappings with production filled-pixel proof. Material, LPE, visibility, Cryptomatte, primitive-attribute, and motion-vector AOVs remain deferred.",
         ),
     )
 
@@ -603,6 +691,23 @@ def _build_parm_template_group():
             "Default disk rendering authors a Beauty RenderVar because H20.5 husk rejects raster RenderProducts with no orderedVars. The internal parameter name remains aov_beauty for compatibility.",
         ),
     )
+
+    aov_controls = [
+        _label(
+            "native_aov_note",
+            "Native AOV Scope",
+            "These toggles author fixed USD RenderVars for existing hdMoonray native RenderBuffer mappings. They default off and do not imply material/LPE/Cryptomatte or arbitrary AOV support.",
+        )
+    ]
+    for aov in AOV_DEFINITIONS:
+        aov_controls.append(
+            hou.ToggleParmTemplate(
+                aov["parm"],
+                aov["label"],
+                default_value=False,
+                help=aov["help"],
+            )
+        )
 
     pixel_samples = _scene_int(
         "pixel_samples",
@@ -896,6 +1001,7 @@ def _build_parm_template_group():
             "MoonRay Render Settings",
             (
                 hou.FolderParmTemplate("render_product", "Render Product", tuple(render_product) + beauty_output),
+                hou.FolderParmTemplate("aovs", "AOVs", tuple(aov_controls)),
                 hou.FolderParmTemplate("sampling", "Sampling", sampling),
                 hou.FolderParmTemplate("tile_order", "Tile Order", tile_order),
                 hou.FolderParmTemplate("ray_depth", "Ray Depth / Path", ray_depth),

@@ -54,7 +54,7 @@ Track A and Track B may run in parallel when UI/USD authoring and backend runtim
 
 Backend files are not forbidden. They may be inspected or temporarily instrumented when runtime evidence points there, especially `RenderBuffer.cc`, `ArrasRenderer.cc`, `RenderPass.cc`, `RenderDelegate.cc`, `UsdRenderers.json`, Beauty/AOV binding lifecycle, render settings dirtying/versioning, and viewport/IPR refresh behavior. Backend behavioral changes require source-path proof, exported USD proof, log proof, and render/EXR or runtime symptom proof before implementation.
 
-Do not flip `aovsupport` because it appears related. Do not restart `cameraDepth`. Do not broaden non-beauty AOV transport. Do not ship UI-only cleanup as a substitute for backend/runtime proof.
+Do not flip `aovsupport` because it appears related. Do not broaden non-beauty AOV transport. Do not ship UI-only cleanup as a substitute for backend/runtime proof.
 
 ## References Consulted
 
@@ -324,8 +324,8 @@ The Beauty control preserves the internal parameter name `aov_beauty` for compat
 `Beauty RenderVar / Disk Output Path`, and it belongs with Render Product/output controls. Disabling
 it is a diagnostic viewport/default-framebuffer test path, not the production disk-output default.
 
-This is not a claim of non-beauty AOV support. It is the minimal proven H20.5 disk-output beauty
-contract.
+This Beauty/default-output contract is separate from non-beauty AOV support. It is the minimal proven
+H20.5 disk-output beauty contract.
 
 Custom Beauty RenderVar when `aov_beauty` is enabled:
 
@@ -333,9 +333,9 @@ Custom Beauty RenderVar when `aov_beauty` is enabled:
 Path: /Render/Products/Vars/beauty
 sourceName = color
 sourceType = raw
-dataType = color3f
+dataType = color4f
 driver:parameters:aov:name = color
-driver:parameters:aov:format = color3f
+driver:parameters:aov:format = color4f
 driver:parameters:aov:multiSampled = 0
 driver:parameters:aov:clearValue = 0
 ```
@@ -343,24 +343,46 @@ driver:parameters:aov:clearValue = 0
 Generic Houdini 20.5 RenderVar extras now aligned:
 
 - `sourceType = raw`.
-- `driver:parameters:aov:format = color3f`.
+- `driver:parameters:aov:format = color4f` for the custom MoonRay Beauty RenderVar.
 - `driver:parameters:aov:multiSampled = 0`.
 - `driver:parameters:aov:clearValue = 0`.
 
 Houdini `customData` appears to be UI/editor metadata and should not be hand-copied unless the integration deliberately adopts the generic/Edit Properties infrastructure.
 
-Non-beauty AOV status:
+Native non-beauty AOV status:
 
-- Hidden/deferred.
-- Do not expose until production `HdMoonrayRendererPlugin` returns nonzero buffers through USD Render ROP/husk.
-- Debug/local path filling non-beauty buffers is not enough for artist UI exposure.
-- If the production path produces zero-filled buffers, classify that as backend payload unresolved, not UI-ready.
+- A first native AOV set is exposed as opt-in checkboxes under the `AOVs` tab.
+- The exposed set is limited to existing hdMoonray `RenderBuffer.cc` mappings with production filled-pixel proof after the RenderBuffer allocation/channel-count fix: `alpha`, `depth`, `Z`, `N`, `Ng`, `P`, `Wp`, `St`, and `weight`.
+- Product-facing depth outputs are `depth` and `Z`.
+- The historical diagnostic depth token is not exposed by the custom MoonRay Render Settings LOP in this pass.
+- Material AOVs, LPE/light AOVs, visibility AOVs, primitive-attribute AOVs, Cryptomatte, display filters, auxiliary adaptive buffers, and motion vectors remain deferred.
+- Debug/local path filling is still not enough for artist UI exposure; future AOVs require production `HdMoonrayRendererPlugin` filled-pixel proof through USD Render ROP/husk or equivalent production path.
+- If a production path produces zero-filled buffers again, classify that as backend payload unresolved, not UI-ready.
 
 Do not remove the default Beauty RenderVar for the custom LOP disk-output path unless fresh H20.5
 viewport/IPR, USD Render ROP/husk, and filled image/EXR output prove a replacement contract. Do not
 extend this evidence to non-beauty AOVs.
 
 Do not claim AOV support from authored RenderVars, metadata, EXR channels, RDLA RenderOutput declarations, or debug renderer success alone.
+
+Current native AOV RenderVar contract:
+
+| UI toggle | RenderVar | sourceName | sourceType | dataType | Status |
+|-----------|-----------|------------|------------|----------|--------|
+| Beauty RenderVar / Disk Output Path | `beauty` | `color` | `raw` | `color4f` | default on; production Beauty/disk output |
+| Alpha | `alpha` | `alpha` | `raw` | `float` | opt-in native AOV |
+| Depth | `depth` | `depth` | `raw` | `float` | opt-in native AOV; follows hdMoonray depth mapping |
+| Z | `Z` | `Z` | `raw` | `float` | opt-in native state-variable depth |
+| N | `N` | `N` | `raw` | `normal3f` | opt-in native state variable |
+| Ng | `Ng` | `Ng` | `raw` | `normal3f` | opt-in native state variable |
+| P | `P` | `P` | `raw` | `point3f` | opt-in native state variable |
+| Wp | `Wp` | `Wp` | `raw` | `point3f` | opt-in native state variable |
+| St | `St` | `St` | `raw` | `float2` | opt-in native state variable |
+| Weight | `weight` | `weight` | `raw` | `float` | opt-in native RenderOutput; simple fixture produced a constant sample-count value |
+
+All selected native AOVs also author matching `driver:parameters:aov:name`, `driver:parameters:aov:format`, `driver:parameters:aov:multiSampled = 0`, and `driver:parameters:aov:clearValue = 0` attrs. These attrs match the working Beauty path and the H20.5 RenderVar metadata shape, but the source of truth for renderer data remains the `sourceName`/`sourceType` pair consumed by hdMoonray.
+
+Manual H20.5 validation showed `color3f` Beauty output could produce vertical RGB/bayer-like EXR corruption in the explicit Beauty RenderVar path. Switching the custom Beauty RenderVar to `color4f` fixed that corruption by matching the RGBA beauty buffer contract. Copernicus and Nuke both read the resulting EXR channels correctly; an earlier Nuke channel-view issue was user selection error, not file corruption.
 
 ## USD Render ROP Integration
 
@@ -498,7 +520,7 @@ Method:
 - Use `HdMoonrayRendererPlugin_Global.ds` as the Houdini 20.5 UI grouping/label/help source where it exposes global render settings.
 - Use `RenderSettings.cc` to prove the supported USD render-settings path: `moonray:sceneVariable:<name>` or `sceneVariable_<name>` on the RenderSettings prim, excluding `camera`, `motion_steps`, `enable_motion_blur`, `layer`, `image_width`, and `image_height`.
 - Use USD Render docs to decide whether a setting belongs on `RenderSettings`, `RenderProduct`, or `RenderVar`.
-- Use `RenderBuffer.cc` and `RenderOutput.json` to classify AOV/output settings but not expose non-beauty AOVs until production-filled buffers are proven.
+- Use `RenderBuffer.cc` and `RenderOutput.json` to classify AOV/output settings. Expose only the first native non-beauty set with production-filled proof; keep material, LPE/light, visibility, primitive-attribute, Cryptomatte, auxiliary, and motion-vector AOV families deferred.
 
 Important boundary:
 
@@ -543,7 +565,8 @@ This table is a summarized inventory of the parameters relevant to the MoonRay R
 | SceneVariables.json | `enable_motion_blur`, `motion_steps`, `fps`, `slerp_xforms` | Motion blur settings | Bool/Float/Vector | metadata defaults | n/a | Motion sampling. | SceneVariables | unknown/special-case | hidden | hide/defer | n/a | `enable_motion_blur` and `motion_steps` are special-cased/excluded in hdMoonRay. |
 | SceneVariables.json | checkpoint/resume/deep settings | Checkpoint/deep output | mixed | metadata defaults | mixed | Output/deep/checkpoint internals. | SceneVariables | RenderSettings prim or output workflow | hidden | hide/defer | n/a | Needs separate render execution/deep/checkpoint pass. |
 | SceneVariables.json | `output_file`, `primary_aov` | MoonRay native output linkage | String/SceneObject* | metadata defaults | n/a | Native MoonRay output path/AOV linkage. | RenderOutput/SceneVariables | do not author here | hidden | do not include in this LOP | n/a | Use USD RenderProduct.productName and RenderVars. |
-| RenderOutput.json | `result`, `state_variable`, `material_aov`, `lpe`, `denoise`, `denoiser_input` | RenderOutput attrs | mixed | metadata defaults | metadata enums | AOV/output realization. | RenderOutput | RenderVar prim / backend output path | hidden except Beauty metadata | needs backend proof | AOVs | Non-beauty AOVs deferred. |
+| RenderOutput.json / RenderBuffer.cc | `alpha`, `depth`, `Z`, `N`, `Ng`, `P`, `Wp`, `St`, `weight` | Native RenderOutput/state-variable AOVs | mixed | off in UI | fixed native mappings | AOV/output realization. | RenderOutput | RenderVar prim / backend output path | exposed as opt-in native set | production filled proof exists for this set | AOVs | Broader AOV families remain deferred. |
+| RenderOutput.json | `material_aov`, `lpe`, `visibility_aov`, primitive attributes, Cryptomatte, auxiliary outputs, motion vectors | Deferred AOV families | mixed | metadata defaults | metadata enums | AOV/output realization. | RenderOutput | RenderVar prim / backend output path | hidden | needs separate production proof | future AOV pass | Do not expose from guessed names. |
 | hdMoonRay delegate | `rdlOutput` | Debug RDL/RDLA Output | String | blank | file path | Debug scene export. | delegate/debug setting | delegate/debug setting | exposed debug-only | expose Debug | Advanced / Debug | Not final image output. |
 | Geometry prim attrs | `moonray:mesh_resolution` etc. | Geometry settings | mixed | n/a | n/a | Geometry tessellation/subdivision. | RDL geometry | geometry prim | not applicable | do not include in this LOP | n/a | Belongs to Render Geometry Settings. |
 | Light prim attrs | per-light `moonray:*` | Light settings | mixed | n/a | n/a | Per-light MoonRay attrs. | RDL light | light prim | not applicable | do not include in this LOP | n/a | Belongs to light-specific UI. |
@@ -591,7 +614,7 @@ Current exposed/custom-authored settings after discovery:
 | `output_file`, `primary_aov`, `two_stage_output` | Native MoonRay output wiring conflicts with USD RenderProduct model unless carefully designed. | RenderProduct/ROP/backend output design | defer |
 | `machine_id`, `num_machines`, `task_distribution_type`, `athena_debug` | Arras/internal/debug. | backend/Arras context | do not include |
 | `max_geometry_resolution`, `enable_max_geometry_resolution`, `fast_geometry_update` | Geometry/procedural behavior, not artist render contract. | geometry/procedural settings | document only |
-| Non-beauty RenderOutputs/AOVs | Production delegate filled-pixel proof missing. | RenderVar + backend AOV pipeline | future AOV pass |
+| Deferred RenderOutputs/AOVs | Material, LPE/light, visibility, primitive-attribute, Cryptomatte, auxiliary, display-filter, and motion-vector paths are not part of the first native set. | RenderVar + backend AOV pipeline | future AOV pass |
 
 ## Geometry / Camera / Light / Material Boundaries
 
@@ -613,12 +636,12 @@ Current exposed/custom-authored settings after discovery:
 | Volumes | Global volume controls | volume quality/shadow/illumination/opacity/overlap/factors/indirect samples | deep output settings | Uses useful volume group from metadata/DS. |
 | Filtering / Textures | Texture/pixel filtering | texture blur, pixel filter width/type | texture cache/file handles for now | Cache controls deferred. |
 | Clamping / Fireflies | Firefly reduction | sample clamp value/depth, roughness clamping factor | none currently | Roughness clamp mirrored from generic MoonRay tab. |
-| AOVs | Artist AOV checkboxes | none | beauty/albedo/normal/depth/OIDN/Cryptomatte | No production AOV tab until buffers are proven. |
-| Advanced / Debug | Troubleshooting/low-level controls | disable optimized hair sampling, debug RDL/RDLA output | Arras/internal/debug dumps, production AOV UI, and default Beauty disk-output controls | Keep sparse. |
+| AOVs | Artist AOV checkboxes | alpha, depth, Z, N, Ng, P, Wp, St, weight | material/LPE/light/visibility/primitive-attribute/Cryptomatte/motion-vector families | Native set only; all toggles default off. |
+| Advanced / Debug | Troubleshooting/low-level controls | disable optimized hair sampling, debug RDL/RDLA output | Arras/internal/debug dumps and default Beauty disk-output controls | Keep sparse. |
 
 ## What Still Remains
 
-- Non-beauty AOV backend payload work and filled-pixel validation.
+- Broader AOV backend/UI work beyond the first native RenderBuffer set.
 - Possible separate geometry settings LOP or expanded geometry tooling.
 - Possible light/material-specific UI passes.
 - Production filled Beauty proof, distinct from output-file smoke proof.
@@ -749,7 +772,7 @@ Current validation also confirms:
 
 - ROP graph comparisons include `moonray_render_settings_lop`, `moonray_render_settings_operator`, and `moonray_render_settings_lop_session_id`.
 - Two MoonRay Render Settings LOPs do not share the same owned `usdrender_rop`.
-- Only the Beauty RenderVar disk-output toggle is visible in the current H20.5 UI; non-beauty production AOV controls remain hidden/deferred.
+- Beauty remains the default disk-output RenderVar. The AOV tab exposes only the first native, production-filled RenderBuffer set with toggles defaulting off.
 - Computed resolution mode parms and `loputils.computeResolutionParameter` / `loputils.updateResolutionParameters` callback references are absent.
 - `image_width` and `image_height` are absent from the curated `SCENE_VARIABLES` list and are not authored as custom USD SceneVariables.
 

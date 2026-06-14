@@ -13,6 +13,7 @@ import subprocess
 import tempfile
 
 import hou
+from pxr import UsdRender
 
 OPERATOR_TYPE = "Lop::DW_MOONRAY::moonrayrendersettings::1"
 ROP_NODE_TYPE = "usdrender_rop"
@@ -54,6 +55,19 @@ def check(name: str, condition: bool, details: object) -> None:
 
 def disable_when(parm: hou.Parm) -> str | None:
     return parm.parmTemplate().conditionals().get(hou.parmCondType.DisableWhen)
+
+
+def folder_template_names_and_labels(container) -> list[tuple[str, str]]:
+    if hasattr(container, "entries"):
+        entries = container.entries()
+    else:
+        entries = container.parmTemplates()
+    names_and_labels = []
+    for entry in entries:
+        if entry.type() == hou.parmTemplateType.Folder:
+            names_and_labels.append((entry.name(), entry.label()))
+            names_and_labels.extend(folder_template_names_and_labels(entry))
+    return names_and_labels
 
 
 def clear_scene() -> hou.Node:
@@ -178,6 +192,7 @@ def test_module_and_hda() -> None:
     module_file = moonray_render_settings.__file__
     check("module_import_path", module_file.endswith(EXPECTED_MODULE_SUFFIX), module_file)
     check("scene_variable_count", len(moonray_render_settings.SCENE_VARIABLES) == EXPECTED_SCENE_VARIABLE_COUNT, len(moonray_render_settings.SCENE_VARIABLES))
+    check("native_aov_definition_count", len(moonray_render_settings.AOV_DEFINITIONS) == 9, [aov["parm"] for aov in moonray_render_settings.AOV_DEFINITIONS])
     node_type = hou.lopNodeTypeCategory().nodeTypes().get(OPERATOR_TYPE)
     check("operator_type_name", node_type is not None, OPERATOR_TYPE)
     definition = node_type.definition() if node_type is not None else None
@@ -376,13 +391,15 @@ def test_resolution_and_usd_contract() -> None:
         "image_width" not in scene_variable_names and "image_height" not in scene_variable_names,
         sorted(name for name in scene_variable_names if name in ("image_width", "image_height")),
     )
+    expected_aov_toggles = sorted(["aov_beauty"] + [aov["parm"] for aov in moonray_render_settings.AOV_DEFINITIONS])
     aov_toggles = sorted(
         parm.name()
         for parm in node.parms()
         if parm.name().startswith("aov_")
         and parm.parmTemplate().type() == hou.parmTemplateType.Toggle
     )
-    check("beauty_internal_name_preserved", aov_toggles == ["aov_beauty"], aov_toggles)
+    check("aov_toggle_set", aov_toggles == expected_aov_toggles, aov_toggles)
+    check("beauty_internal_name_preserved", "aov_beauty" in aov_toggles, aov_toggles)
     beauty = node.parm("aov_beauty")
     beauty_template = beauty.parmTemplate() if beauty is not None else None
     check("beauty_default_on_for_disk_output", beauty is not None and bool(beauty.eval()), beauty.eval() if beauty is not None else None)
@@ -391,7 +408,15 @@ def test_resolution_and_usd_contract() -> None:
         beauty_template is not None and beauty_template.label() == "Beauty RenderVar / Disk Output Path",
         beauty_template.label() if beauty_template is not None else None,
     )
-    check("production_aov_folder_removed", '"aovs"' not in ptg_text, "no production AOV folder token")
+    aov_defaults = {aov["parm"]: node.parm(aov["parm"]).eval() if node.parm(aov["parm"]) is not None else None for aov in moonray_render_settings.AOV_DEFINITIONS}
+    check("native_aov_toggles_default_off", all(value == 0 for value in aov_defaults.values()), aov_defaults)
+    folders = folder_template_names_and_labels(node.parmTemplateGroup())
+    check("native_aov_folder_present", any(label == "AOVs" for _, label in folders), folders)
+    check(
+        "deferred_aov_families_not_exposed",
+        not any(name in aov_toggles for name in ("aov_material", "aov_lpe", "aov_cryptomatte", "aov_visibility", "aov_motionvec")),
+        aov_toggles,
+    )
     sampling_mode_template = node.parm("sceneVariable_sampling_mode").parmTemplate()
     light_sampling_mode_template = node.parm("sceneVariable_light_sampling_mode").parmTemplate()
     sampling_mode_items = sampling_mode_template.menuItems()
@@ -435,6 +460,11 @@ def test_resolution_and_usd_contract() -> None:
     }
     for test_name, ok in default_checks.items():
         check("usd_default_contract_" + test_name, ok, usd_path)
+    default_non_beauty_absent = {
+        aov["render_var"]: ('def RenderVar "%s"' % aov["render_var"]) not in text
+        for aov in moonray_render_settings.AOV_DEFINITIONS
+    }
+    check("usd_default_contract_non_beauty_aovs_absent", all(default_non_beauty_absent.values()), default_non_beauty_absent)
 
     node.parm("sceneVariable_sampling_mode").set(1)
     node.parm("sceneVariable_min_adaptive_samples").set(3)
@@ -486,14 +516,55 @@ def test_resolution_and_usd_contract() -> None:
     debug_checks = {
         "RenderVar_when_enabled": 'def RenderVar "beauty"' in debug_text,
         "orderedVars_when_enabled": 'rel orderedVars = </Render/Products/Vars/beauty>' in debug_text,
+        "beauty_dataType": 'uniform token dataType = "color4f"' in debug_text,
         "beauty_sourceType": 'uniform token sourceType = "raw"' in debug_text,
-        "beauty_format": 'driver:parameters:aov:format = "color3f"' in debug_text,
+        "beauty_format": 'driver:parameters:aov:format = "color4f"' in debug_text,
         "beauty_multiSampled": 'driver:parameters:aov:multiSampled = 0' in debug_text,
         "beauty_clearValue": 'driver:parameters:aov:clearValue = 0' in debug_text,
         "beauty_only_orderedVars": debug_text.count("rel orderedVars = </Render/Products/Vars/beauty>") == 1,
     }
     for test_name, ok in debug_checks.items():
         check("usd_debug_beauty_contract_" + test_name, ok, debug_usd_path)
+
+    for aov in moonray_render_settings.AOV_DEFINITIONS:
+        node.parm(aov["parm"]).set(1)
+    node.cook(force=True)
+    native_aov_usd_path = os.path.join(tempfile.gettempdir(), "moonray_render_settings_lifecycle_validation_native_aovs.usda")
+    node.stage().Flatten().Export(native_aov_usd_path)
+    stage_obj = node.stage()
+    product = UsdRender.Product(stage_obj.GetPrimAtPath("/Render/Products/renderproduct"))
+    targets = [str(target) for target in product.GetOrderedVarsRel().GetTargets()]
+    expected_targets = ["/Render/Products/Vars/beauty"] + [
+        "/Render/Products/Vars/" + aov["render_var"]
+        for aov in moonray_render_settings.AOV_DEFINITIONS
+    ]
+    check("usd_native_aovs_orderedVars", targets == expected_targets, targets)
+    expected_render_vars = {"beauty"} | {aov["render_var"] for aov in moonray_render_settings.AOV_DEFINITIONS}
+    vars_prim = stage_obj.GetPrimAtPath("/Render/Products/Vars")
+    authored_render_vars = {child.GetName() for child in vars_prim.GetChildren()} if vars_prim.IsValid() else set()
+    check("usd_native_aovs_no_extra_renderVars", authored_render_vars == expected_render_vars, sorted(authored_render_vars))
+    for aov in moonray_render_settings.AOV_DEFINITIONS:
+        path = "/Render/Products/Vars/" + aov["render_var"]
+        render_var = UsdRender.Var(stage_obj.GetPrimAtPath(path))
+        attrs = {
+            "dataType": str(render_var.GetDataTypeAttr().Get()),
+            "sourceName": render_var.GetSourceNameAttr().Get(),
+            "sourceType": str(render_var.GetSourceTypeAttr().Get()),
+            "aov_name": render_var.GetPrim().GetAttribute("driver:parameters:aov:name").Get(),
+            "aov_format": str(render_var.GetPrim().GetAttribute("driver:parameters:aov:format").Get()),
+            "multiSampled": render_var.GetPrim().GetAttribute("driver:parameters:aov:multiSampled").Get(),
+            "clearValue": render_var.GetPrim().GetAttribute("driver:parameters:aov:clearValue").Get(),
+        }
+        ok = (
+            attrs["dataType"] == aov["data_type"]
+            and attrs["sourceName"] == aov["source_name"]
+            and attrs["sourceType"] == "raw"
+            and attrs["aov_name"] == aov["source_name"]
+            and attrs["aov_format"] == aov["data_type"]
+            and attrs["multiSampled"] is False
+            and attrs["clearValue"] == 0
+        )
+        check("usd_native_aov_contract_" + aov["render_var"], ok, {"path": path, **attrs})
 
 def test_rdla_receipt() -> None:
     # RDLA export is practical but can be slow; use a tiny lit fixture and a timeout.
