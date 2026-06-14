@@ -98,6 +98,85 @@ AOV_DEFINITIONS = (
     },
 )
 
+MATERIAL_AOV_DEFINITIONS = (
+    {
+        "parm": "aov_denoise_albedo",
+        "label": "Denoise Albedo",
+        "render_var": "denoise_albedo",
+        "source_name": "D.albedo",
+        "source_type": "shader",
+        "data_type": "color3f",
+        "extra_attrs": {
+            "parameters:moonray:denoiser_input": (Sdf.ValueTypeNames.Token, "as albedo"),
+            "parameters:moonray:channel_suffix_mode": (Sdf.ValueTypeNames.Token, "rgb"),
+            "parameters:moonray:channel_format": (Sdf.ValueTypeNames.Token, "float"),
+        },
+        "help": "Official MoonRay OIDN albedo auxiliary output: material AOV D.albedo tagged as denoiser input.",
+    },
+    {
+        "parm": "aov_denoise_normal",
+        "label": "Denoise Normal",
+        "render_var": "denoise_normal",
+        "source_name": "N",
+        "source_type": "raw",
+        "data_type": "normal3f",
+        "extra_attrs": {
+            "parameters:moonray:denoiser_input": (Sdf.ValueTypeNames.Token, "as normal"),
+            "parameters:moonray:channel_suffix_mode": (Sdf.ValueTypeNames.Token, "rgb"),
+            "parameters:moonray:channel_format": (Sdf.ValueTypeNames.Token, "float"),
+        },
+        "help": "Official MoonRay OIDN normal auxiliary output: state variable N tagged as denoiser input.",
+    },
+    {
+        "parm": "aov_material_albedo",
+        "label": "Material Albedo",
+        "render_var": "material_albedo",
+        "source_name": "albedo",
+        "source_type": "shader",
+        "data_type": "color3f",
+        "help": "MoonRay material AOV albedo expression.",
+    },
+    {
+        "parm": "aov_material_emission",
+        "label": "Material Emission",
+        "render_var": "material_emission",
+        "source_name": "emission",
+        "source_type": "shader",
+        "data_type": "color3f",
+        "help": "MoonRay material AOV emission expression.",
+    },
+    {
+        "parm": "aov_material_normal",
+        "label": "Material Normal",
+        "render_var": "material_normal",
+        "source_name": "normal",
+        "source_type": "shader",
+        "data_type": "normal3f",
+        "extra_attrs": {
+            "parameters:moonray:channel_suffix_mode": (Sdf.ValueTypeNames.Token, "rgb"),
+        },
+        "help": "MoonRay material AOV normal expression.",
+    },
+    {
+        "parm": "aov_material_roughness",
+        "label": "Material Roughness",
+        "render_var": "material_roughness",
+        "source_name": "roughness",
+        "source_type": "shader",
+        "data_type": "float2",
+        "help": "MoonRay material AOV glossy roughness expression.",
+    },
+    {
+        "parm": "aov_material_pbr_validity",
+        "label": "Material PBR Validity",
+        "render_var": "material_pbr_validity",
+        "source_name": "pbr_validity",
+        "source_type": "shader",
+        "data_type": "color3f",
+        "help": "MoonRay material AOV PBR validity diagnostic expression.",
+    },
+)
+
 
 SCENE_VARIABLES = (
     ("sampling_mode", Sdf.ValueTypeNames.Token),
@@ -187,7 +266,7 @@ def _set_rel_targets(schema_obj, create_rel, paths):
     return rel
 
 
-def _define_render_var(stage, path, data_type, source_name, source_type="raw"):
+def _define_render_var(stage, path, data_type, source_name, source_type="raw", extra_attrs=None):
     render_var = UsdRender.Var.Define(stage, path)
     render_var.CreateDataTypeAttr().Set(data_type)
     render_var.CreateSourceNameAttr().Set(source_name)
@@ -213,6 +292,8 @@ def _define_render_var(stage, path, data_type, source_name, source_type="raw"):
         Sdf.ValueTypeNames.Int,
         custom=True,
     ).Set(0)
+    for attr_name, (value_type, value) in (extra_attrs or {}).items():
+        prim.CreateAttribute(attr_name, value_type, custom=True).Set(value)
     return render_var
 
 
@@ -262,6 +343,19 @@ def author_from_node(node=None):
             continue
         aov_path = _child_path(vars_parent_path, aov["render_var"])
         _define_render_var(stage, aov_path, aov["data_type"], aov["source_name"])
+        ordered_vars.append(aov_path)
+    for aov in MATERIAL_AOV_DEFINITIONS:
+        if not _bool_parm(node, aov["parm"], False):
+            continue
+        aov_path = _child_path(vars_parent_path, aov["render_var"])
+        _define_render_var(
+            stage,
+            aov_path,
+            aov["data_type"],
+            aov["source_name"],
+            aov.get("source_type", "raw"),
+            aov.get("extra_attrs"),
+        )
         ordered_vars.append(aov_path)
     _set_rel_targets(product, product.CreateOrderedVarsRel, ordered_vars)
 
@@ -666,7 +760,7 @@ def _build_parm_template_group():
         _label(
             "experimental_aov_note",
             "AOV Status",
-            "The AOV tab exposes only native RenderBuffer mappings with production filled-pixel proof. Material, LPE, visibility, Cryptomatte, primitive-attribute, and motion-vector AOVs remain deferred.",
+            "The AOV tab exposes only native RenderBuffer mappings with production filled-pixel proof. Broader material, LPE, visibility, Cryptomatte, primitive-attribute, and motion-vector AOVs remain deferred.",
         ),
     )
 
@@ -701,6 +795,23 @@ def _build_parm_template_group():
     ]
     for aov in AOV_DEFINITIONS:
         aov_controls.append(
+            hou.ToggleParmTemplate(
+                aov["parm"],
+                aov["label"],
+                default_value=False,
+                help=aov["help"],
+            )
+        )
+
+    material_aov_controls = [
+        _label(
+            "material_aov_note",
+            "Material / Denoise AOV Scope",
+            "These toggles author documented MoonRay material AOV and denoiser auxiliary RenderVars. They default off and stay limited to production-proven MoonRay material/state-variable contracts.",
+        )
+    ]
+    for aov in MATERIAL_AOV_DEFINITIONS:
+        material_aov_controls.append(
             hou.ToggleParmTemplate(
                 aov["parm"],
                 aov["label"],
@@ -1002,6 +1113,7 @@ def _build_parm_template_group():
             (
                 hou.FolderParmTemplate("render_product", "Render Product", tuple(render_product) + beauty_output),
                 hou.FolderParmTemplate("aovs", "AOVs", tuple(aov_controls)),
+                hou.FolderParmTemplate("material_denoise_aovs", "Material / Denoise AOVs", tuple(material_aov_controls)),
                 hou.FolderParmTemplate("sampling", "Sampling", sampling),
                 hou.FolderParmTemplate("tile_order", "Tile Order", tile_order),
                 hou.FolderParmTemplate("ray_depth", "Ray Depth / Path", ray_depth),

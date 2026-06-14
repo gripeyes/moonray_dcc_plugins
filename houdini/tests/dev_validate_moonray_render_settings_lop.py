@@ -193,6 +193,16 @@ def test_module_and_hda() -> None:
     check("module_import_path", module_file.endswith(EXPECTED_MODULE_SUFFIX), module_file)
     check("scene_variable_count", len(moonray_render_settings.SCENE_VARIABLES) == EXPECTED_SCENE_VARIABLE_COUNT, len(moonray_render_settings.SCENE_VARIABLES))
     check("native_aov_definition_count", len(moonray_render_settings.AOV_DEFINITIONS) == 9, [aov["parm"] for aov in moonray_render_settings.AOV_DEFINITIONS])
+    check(
+        "material_aov_definition_count",
+        len(moonray_render_settings.MATERIAL_AOV_DEFINITIONS) == 7,
+        [aov["parm"] for aov in moonray_render_settings.MATERIAL_AOV_DEFINITIONS],
+    )
+    all_aov_parms = [aov["parm"] for aov in moonray_render_settings.AOV_DEFINITIONS] + [
+        aov["parm"] for aov in moonray_render_settings.MATERIAL_AOV_DEFINITIONS
+    ]
+    forbidden = ("aov_camera_" + "depth", "aov_cryptomatte", "aov_lpe", "aov_visibility", "aov_motion_vector")
+    check("forbidden_aov_parms_absent", not any(name in all_aov_parms for name in forbidden), all_aov_parms)
     node_type = hou.lopNodeTypeCategory().nodeTypes().get(OPERATOR_TYPE)
     check("operator_type_name", node_type is not None, OPERATOR_TYPE)
     definition = node_type.definition() if node_type is not None else None
@@ -391,7 +401,11 @@ def test_resolution_and_usd_contract() -> None:
         "image_width" not in scene_variable_names and "image_height" not in scene_variable_names,
         sorted(name for name in scene_variable_names if name in ("image_width", "image_height")),
     )
-    expected_aov_toggles = sorted(["aov_beauty"] + [aov["parm"] for aov in moonray_render_settings.AOV_DEFINITIONS])
+    expected_aov_toggles = sorted(
+        ["aov_beauty"]
+        + [aov["parm"] for aov in moonray_render_settings.AOV_DEFINITIONS]
+        + [aov["parm"] for aov in moonray_render_settings.MATERIAL_AOV_DEFINITIONS]
+    )
     aov_toggles = sorted(
         parm.name()
         for parm in node.parms()
@@ -412,9 +426,10 @@ def test_resolution_and_usd_contract() -> None:
     check("native_aov_toggles_default_off", all(value == 0 for value in aov_defaults.values()), aov_defaults)
     folders = folder_template_names_and_labels(node.parmTemplateGroup())
     check("native_aov_folder_present", any(label == "AOVs" for _, label in folders), folders)
+    check("material_denoise_aov_folder_present", any(label == "Material / Denoise AOVs" for _, label in folders), folders)
     check(
         "deferred_aov_families_not_exposed",
-        not any(name in aov_toggles for name in ("aov_material", "aov_lpe", "aov_cryptomatte", "aov_visibility", "aov_motionvec")),
+        not any(name in aov_toggles for name in ("aov_camera_" + "depth", "aov_lpe", "aov_cryptomatte", "aov_visibility", "aov_motionvec")),
         aov_toggles,
     )
     sampling_mode_template = node.parm("sceneVariable_sampling_mode").parmTemplate()
@@ -565,6 +580,69 @@ def test_resolution_and_usd_contract() -> None:
             and attrs["clearValue"] == 0
         )
         check("usd_native_aov_contract_" + aov["render_var"], ok, {"path": path, **attrs})
+
+    stage = clear_scene()
+    node = create_settings(stage, "moonrayrendersettings1")
+    folder_labels = folder_template_names_and_labels(node.parmTemplateGroup())
+    check(
+        "material_denoise_aov_folder_exists",
+        any(label == "Material / Denoise AOVs" for _, label in folder_labels),
+        folder_labels,
+    )
+    for aov in moonray_render_settings.MATERIAL_AOV_DEFINITIONS:
+        parm = node.parm(aov["parm"])
+        check("material_aov_toggle_default_off_" + aov["parm"], parm is not None and parm.eval() == 0, parm.eval() if parm else None)
+
+    required_controls = {"aov_denoise_albedo", "aov_denoise_normal"}
+    material_controls = {aov["parm"] for aov in moonray_render_settings.MATERIAL_AOV_DEFINITIONS}
+    check("required_denoise_controls_exist", required_controls <= material_controls, sorted(material_controls))
+
+    for aov in moonray_render_settings.MATERIAL_AOV_DEFINITIONS:
+        node.parm(aov["parm"]).set(1)
+    node.cook(force=True)
+    material_aov_usd_path = os.path.join(tempfile.gettempdir(), "moonray_render_settings_lifecycle_validation_material_aovs.usda")
+    node.stage().Flatten().Export(material_aov_usd_path)
+    stage_obj = node.stage()
+    product = UsdRender.Product(stage_obj.GetPrimAtPath("/Render/Products/renderproduct"))
+    targets = [str(target) for target in product.GetOrderedVarsRel().GetTargets()]
+    expected_targets = ["/Render/Products/Vars/beauty"] + [
+        "/Render/Products/Vars/" + aov["render_var"]
+        for aov in moonray_render_settings.MATERIAL_AOV_DEFINITIONS
+    ]
+    check("usd_material_aovs_orderedVars", targets == expected_targets, targets)
+    expected_render_vars = {"beauty"} | {aov["render_var"] for aov in moonray_render_settings.MATERIAL_AOV_DEFINITIONS}
+    vars_prim = stage_obj.GetPrimAtPath("/Render/Products/Vars")
+    authored_render_vars = {child.GetName() for child in vars_prim.GetChildren()} if vars_prim.IsValid() else set()
+    check("usd_material_aovs_no_extra_renderVars", authored_render_vars == expected_render_vars, sorted(authored_render_vars))
+    diagnostic_depth_token = "camera" + "Depth"
+    check("usd_material_aovs_no_diagnostic_depth_token", diagnostic_depth_token not in authored_render_vars, sorted(authored_render_vars))
+    for aov in moonray_render_settings.MATERIAL_AOV_DEFINITIONS:
+        path = "/Render/Products/Vars/" + aov["render_var"]
+        render_var = UsdRender.Var(stage_obj.GetPrimAtPath(path))
+        prim = render_var.GetPrim()
+        attrs = {
+            "dataType": str(render_var.GetDataTypeAttr().Get()),
+            "sourceName": render_var.GetSourceNameAttr().Get(),
+            "sourceType": str(render_var.GetSourceTypeAttr().Get()),
+            "aov_name": prim.GetAttribute("driver:parameters:aov:name").Get(),
+            "aov_format": str(prim.GetAttribute("driver:parameters:aov:format").Get()),
+            "multiSampled": prim.GetAttribute("driver:parameters:aov:multiSampled").Get(),
+            "clearValue": prim.GetAttribute("driver:parameters:aov:clearValue").Get(),
+        }
+        for attr_name in aov.get("extra_attrs", {}):
+            attrs[attr_name] = prim.GetAttribute(attr_name).Get()
+        ok = (
+            attrs["dataType"] == aov["data_type"]
+            and attrs["sourceName"] == aov["source_name"]
+            and attrs["sourceType"] == aov.get("source_type", "raw")
+            and attrs["aov_name"] == aov["source_name"]
+            and attrs["aov_format"] == aov["data_type"]
+            and attrs["multiSampled"] is False
+            and attrs["clearValue"] == 0
+        )
+        for attr_name, (_, expected_value) in aov.get("extra_attrs", {}).items():
+            ok = ok and attrs[attr_name] == expected_value
+        check("usd_material_aov_contract_" + aov["render_var"], ok, {"path": path, **attrs})
 
 def test_rdla_receipt() -> None:
     # RDLA export is practical but can be slow; use a tiny lit fixture and a timeout.

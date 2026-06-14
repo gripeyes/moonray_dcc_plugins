@@ -384,6 +384,46 @@ All selected native AOVs also author matching `driver:parameters:aov:name`, `dri
 
 Manual H20.5 validation showed `color3f` Beauty output could produce vertical RGB/bayer-like EXR corruption in the explicit Beauty RenderVar path. Switching the custom Beauty RenderVar to `color4f` fixed that corruption by matching the RGBA beauty buffer contract. Copernicus and Nuke both read the resulting EXR channels correctly; an earlier Nuke channel-view issue was user selection error, not file corruption.
 
+## Material / Denoise AOV Contract
+
+Official MoonRay evidence:
+
+- The [moonray_gui documentation](https://docs.openmoonray.org/user-reference/tools/moonray-gui/) states that denoiser auxiliary buffers must be represented by `RenderOutput` objects tagged with `denoiser_input`; names and filenames are not important to the denoiser.
+- The documented OIDN albedo auxiliary contract is `result = material aov`, `material aov = D.albedo`, and `denoiser_input = as albedo`.
+- The documented OIDN normal auxiliary contract is `result = state variable`, `state variable = N`, `channel_suffix_mode = rgb`, and `denoiser_input = as normal`.
+- The [Material AOV guide](https://docs.openmoonray.org/user-reference/how-to-guides/render-outputs/material-aovs/) defines material AOVs as diagnostic material-property outputs with syntax `[('<Label>')+\\.][(SS | R | T | D | G | M)+\\.][fresnel\\.]<property>`.
+- `/Applications/MoonRay/installs/openmoonray/coredata/RenderOutput.json` lists the relevant RenderOutput attrs: `result`, `material_aov`, `state_variable`, `channel_format`, `channel_suffix_mode`, and `denoiser_input`.
+
+hdMoonray bridge evidence:
+
+- `RenderBuffer.cc::aovNameFromSettings()` maps `sourceType = shader` to the internal `shader:<sourceName>` form.
+- `RenderBuffer.cc::bind()` maps the `shader:` prefix to MoonRay `RESULT_MATERIAL_AOV` and copies `parameters:moonray:<RenderOutput attr>` AOV settings onto the created MoonRay `RenderOutput`.
+- Therefore the custom LOP authors material AOV RenderVars with `sourceType = shader` and authors denoiser/channel metadata as `parameters:moonray:*` attrs on the RenderVar.
+
+Current exposed Material / Denoise AOV set:
+
+| UI toggle | RenderVar | sourceName | sourceType | dataType | Extra MoonRay RenderOutput attrs | Status |
+|-----------|-----------|------------|------------|----------|----------------------------------|--------|
+| Denoise Albedo | `denoise_albedo` | `D.albedo` | `shader` | `color3f` | `denoiser_input = as albedo`, `channel_suffix_mode = rgb`, `channel_format = float` | production H20.5 EXR proof; required OIDN auxiliary |
+| Denoise Normal | `denoise_normal` | `N` | `raw` | `normal3f` | `denoiser_input = as normal`, `channel_suffix_mode = rgb`, `channel_format = float` | production H20.5 EXR proof; required OIDN auxiliary |
+| Material Albedo | `material_albedo` | `albedo` | `shader` | `color3f` | none | production H20.5 EXR proof |
+| Material Emission | `material_emission` | `emission` | `shader` | `color3f` | none | production H20.5 EXR proof |
+| Material Normal | `material_normal` | `normal` | `shader` | `normal3f` | `channel_suffix_mode = rgb` | production H20.5 EXR proof |
+| Material Roughness | `material_roughness` | `roughness` | `shader` | `float2` | none | production H20.5 EXR proof |
+| Material PBR Validity | `material_pbr_validity` | `pbr_validity` | `shader` | `color3f` | none | production H20.5 EXR proof |
+
+The expected OIDN auxiliary set is Beauty/color plus Denoise Albedo plus Denoise Normal. Beauty remains the `color4f` default disk-output RenderVar; the denoise auxiliaries are opt-in and default off.
+
+Discovered but not exposed in this pass:
+
+| Candidate | Official/local status | Reason not exposed |
+|-----------|----------------------|--------------------|
+| `color` | Listed as a material AOV property in official docs/metadata. | The H20.5 production proof scene did not produce a distinct `color` subimage through the current hdMoonray material-AOV bridge. |
+| `factor` | Listed as a material AOV property in official docs/metadata. | The proof scene produced a constant zero output; no meaningful production proof yet. |
+| `radius` | Listed as a material AOV property in official docs/metadata. | The proof scene produced a constant zero output; likely needs a subsurface-specific material setup and separate proof. |
+
+Cryptomatte, LPE/light AOVs, visibility AOVs, primitive-attribute AOVs, arbitrary primvars, display-filter outputs, auxiliary adaptive buffers, and motion vectors remain deferred. The historical diagnostic depth token is not product-facing and is not exposed by this LOP.
+
 ## USD Render ROP Integration
 
 Houdini 20.5 USD Render ROP parameter names for both LOP `usdrender_rop` and OUT `usdrender`:
@@ -520,7 +560,7 @@ Method:
 - Use `HdMoonrayRendererPlugin_Global.ds` as the Houdini 20.5 UI grouping/label/help source where it exposes global render settings.
 - Use `RenderSettings.cc` to prove the supported USD render-settings path: `moonray:sceneVariable:<name>` or `sceneVariable_<name>` on the RenderSettings prim, excluding `camera`, `motion_steps`, `enable_motion_blur`, `layer`, `image_width`, and `image_height`.
 - Use USD Render docs to decide whether a setting belongs on `RenderSettings`, `RenderProduct`, or `RenderVar`.
-- Use `RenderBuffer.cc` and `RenderOutput.json` to classify AOV/output settings. Expose only the first native non-beauty set with production-filled proof; keep material, LPE/light, visibility, primitive-attribute, Cryptomatte, auxiliary, and motion-vector AOV families deferred.
+- Use `RenderBuffer.cc` and `RenderOutput.json` to classify AOV/output settings. Expose only the native and material/denoise outputs with production-filled proof; keep unproven material candidates plus LPE/light, visibility, primitive-attribute, Cryptomatte, auxiliary, and motion-vector AOV families deferred.
 
 Important boundary:
 
@@ -614,7 +654,7 @@ Current exposed/custom-authored settings after discovery:
 | `output_file`, `primary_aov`, `two_stage_output` | Native MoonRay output wiring conflicts with USD RenderProduct model unless carefully designed. | RenderProduct/ROP/backend output design | defer |
 | `machine_id`, `num_machines`, `task_distribution_type`, `athena_debug` | Arras/internal/debug. | backend/Arras context | do not include |
 | `max_geometry_resolution`, `enable_max_geometry_resolution`, `fast_geometry_update` | Geometry/procedural behavior, not artist render contract. | geometry/procedural settings | document only |
-| Deferred RenderOutputs/AOVs | Material, LPE/light, visibility, primitive-attribute, Cryptomatte, auxiliary, display-filter, and motion-vector paths are not part of the first native set. | RenderVar + backend AOV pipeline | future AOV pass |
+| Deferred RenderOutputs/AOVs | Unproven material candidates plus LPE/light, visibility, primitive-attribute, Cryptomatte, auxiliary, display-filter, and motion-vector paths are not part of the exposed proven set. | RenderVar + backend AOV pipeline | future AOV pass |
 
 ## Geometry / Camera / Light / Material Boundaries
 
