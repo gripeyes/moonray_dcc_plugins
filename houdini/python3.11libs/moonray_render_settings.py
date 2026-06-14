@@ -604,6 +604,13 @@ def _build_parm_template_group():
         ),
     )
 
+    pixel_samples = _scene_int(
+        "pixel_samples",
+        "Pixel Samples",
+        8,
+        max_value=4096,
+        help_text="The square root of the number of primary samples taken for each pixel in uniform sampling mode.",
+    )
     sampling = [
         _scene_menu(
             "sampling_mode",
@@ -621,13 +628,7 @@ def _build_parm_template_group():
             "uniform",
             "Controls which light sampling scheme to use: uniform or adaptive.",
         ),
-        _scene_int(
-            "pixel_samples",
-            "Pixel Samples",
-            8,
-            max_value=4096,
-            help_text="The square root of the number of primary samples taken for each pixel in uniform sampling mode.",
-        ),
+        pixel_samples,
         _scene_int(
             "light_samples",
             "Light Samples",
@@ -659,10 +660,11 @@ def _build_parm_template_group():
     )
     light_sampling_quality.setConditional(
         hou.parmCondType.DisableWhen,
-        "{ sceneVariable_light_sampling_mode != adaptive }",
+        '{ sceneVariable_light_sampling_mode != "adaptive" }',
     )
     sampling.insert(2, light_sampling_quality)
-    adaptive_cond = "{ sceneVariable_sampling_mode != adaptive }"
+    pixel_samples.setConditional(hou.parmCondType.DisableWhen, '{ sceneVariable_sampling_mode != "uniform" }')
+    adaptive_cond = '{ sceneVariable_sampling_mode != "adaptive" }'
     for name, label, default, help_text in (
         (
             "sceneVariable_min_adaptive_samples",

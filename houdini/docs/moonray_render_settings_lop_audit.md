@@ -264,6 +264,40 @@ The Render Settings LOP must not absorb every MoonRay or USD setting. Not every 
 
 Do not expose `moonray:mesh_resolution` in the Render Settings LOP as a global render setting. Geometry, light, material, and camera prim-level settings belong on their own prims unless Houdini 20.5 native/generic behavior proves otherwise.
 
+### Sampling Mode Contract
+
+The current H20.5 source and documentation split sampling controls by mode:
+
+- MoonRay `sampling_mode` is a native SceneVariables enum. Local `SceneVariables.json`
+  and the public SceneVariables reference define `uniform = 0` and `adaptive = 2`.
+- The custom LOP authors token strings, `uniform` and `adaptive`, as
+  `moonray:sceneVariable:sampling_mode`; `hdMoonray::ValueConverter` maps those
+  enum tokens to the native MoonRay enum values.
+- MoonRay `pixel_samples` is the uniform sampling control.
+- MoonRay `min_adaptive_samples`, `max_adaptive_samples`, and
+  `target_adaptive_error` are adaptive sampling controls.
+- MoonRay `light_sampling_mode` uses `uniform = 0` and `adaptive = 1`;
+  `light_sampling_quality` is active only in adaptive light sampling mode.
+
+Houdini menu conditionals for this generated HDA use the custom LOP menu token
+strings, not native MoonRay enum integer values and not HOM `eval()` integers.
+The menu items are `("uniform", "adaptive")`. The custom LOP therefore disables:
+
+- `Pixel Samples` when `sceneVariable_sampling_mode != "uniform"`.
+- `Min Adaptive Samples`, `Max Adaptive Samples`, and `Target Adaptive Error`
+  when `sceneVariable_sampling_mode != "adaptive"`.
+- `Light Sampling Quality` when `sceneVariable_light_sampling_mode != "adaptive"`.
+
+Headless Hython validation can inspect the conditional strings, but it does not
+prove the graphical disabled/greyed-out state. Fresh H20.5 GUI validation should
+still be used before claiming viewport/UI parity with Solaris Display Options.
+
+The LOP currently authors the curated SceneVariables consistently even when a
+control is inactive for the selected mode. Validation shows changing sampling
+values and toggling `Sampling Mode` updates the exported USD without requiring a
+manual dropdown refresh. The inactive values are retained as SceneVariables, but
+the UI now communicates which controls are relevant for the selected mode.
+
 ## Beauty RenderVar and AOV Status
 
 The H20.5 USD Render ROP / husk disk-output workflow now authors a Beauty RenderVar by default. A
@@ -531,9 +565,9 @@ Current exposed/custom-authored settings after discovery:
 | Output / Product | Beauty RenderVar / Disk Output Path | `aov_beauty` | `RenderProduct.orderedVars` + Beauty RenderVar | RenderVar | enabled | H20.5 `husk`/EXR evidence | Default disk-output path validated; disabled state is diagnostic only |
 | Sampling | Sampling Mode | `sceneVariable_sampling_mode` | `moonray:sceneVariable:sampling_mode` | token-authored enum | `uniform` | SceneVariables metadata | RDLA token path proven for enum style |
 | Sampling | Light Sampling Mode | `sceneVariable_light_sampling_mode` | `moonray:sceneVariable:light_sampling_mode` | token-authored enum | `uniform` | SceneVariables metadata | RDLA-proven |
-| Sampling | Light Sampling Quality | `sceneVariable_light_sampling_quality` | `moonray:sceneVariable:light_sampling_quality` | float | `0.5` | SceneVariables metadata | newly added; needs RDLA validation |
-| Sampling | Pixel/Light/BSDF/BSSRDF Samples | `sceneVariable_*_samples` | `moonray:sceneVariable:*` | int | metadata defaults | SceneVariables metadata | validated previously for representative attrs |
-| Sampling | Min/Max Adaptive Samples, Target Adaptive Error | `sceneVariable_min_adaptive_samples`, etc. | `moonray:sceneVariable:*` | int/float | metadata defaults | SceneVariables metadata | validated previously for target error |
+| Sampling | Light Sampling Quality | `sceneVariable_light_sampling_quality` | `moonray:sceneVariable:light_sampling_quality` | float | `0.5` | SceneVariables metadata | RDLA-proven; disabled unless Light Sampling Mode is adaptive |
+| Sampling | Pixel/Light/BSDF/BSSRDF Samples | `sceneVariable_*_samples` | `moonray:sceneVariable:*` | int | metadata defaults | SceneVariables metadata | validated for authoring; Pixel Samples disabled unless Sampling Mode is uniform |
+| Sampling | Min/Max Adaptive Samples, Target Adaptive Error | `sceneVariable_min_adaptive_samples`, etc. | `moonray:sceneVariable:*` | int/float | metadata defaults | SceneVariables metadata | validated for authoring/toggle updates; adaptive controls disabled unless Sampling Mode is adaptive |
 | Sampling | Lock Frame Noise | `sceneVariable_lock_frame_noise` | `moonray:sceneVariable:lock_frame_noise` | bool | false | SceneVariables metadata | newly added; needs RDLA validation |
 | Tile Order | Batch/Progressive/Checkpoint Tile Order | `sceneVariable_*_tile_order` | `moonray:sceneVariable:*` | token-authored enum | `morton` | SceneVariables metadata | validated previously for authored attrs |
 | Ray Depth / Path | Ray depth/path controls | `sceneVariable_max_*`, thresholds | `moonray:sceneVariable:*` | int/float | metadata defaults | SceneVariables metadata | validated previously for representative attrs |
@@ -718,6 +752,56 @@ Current validation also confirms:
 - Only the Beauty RenderVar disk-output toggle is visible in the current H20.5 UI; non-beauty production AOV controls remain hidden/deferred.
 - Computed resolution mode parms and `loputils.computeResolutionParameter` / `loputils.updateResolutionParameters` callback references are absent.
 - `image_width` and `image_height` are absent from the curated `SCENE_VARIABLES` list and are not authored as custom USD SceneVariables.
+
+### Frame Range and ROP Handoff
+
+SideFX USD Render ROP documentation separates authored USD time metadata from
+the ROP's actual render frame range. A layer can contain `startTimeCode`,
+`endTimeCode`, `framesPerSecond`, and `timeCodesPerSecond`, but the USD Render
+ROP still needs its `Valid Frame Range`/`trange` mode to request a sequence from
+`husk`.
+
+The owned MoonRay `usdrender_rop` keeps the native USD Render ROP default of
+rendering the current frame. To render a sequence, set the ROP to a frame-range
+mode, such as `Render Specific Frame Range`, or to the stage-driven mode when
+that is the desired native USD Render ROP behavior.
+
+H20.5 headless validation using the owned ROP, the committed output-path wiring,
+and an existing proven MoonRay USD scene rendered frames `1-5` in explicit frame
+range mode to:
+
+```text
+/tmp/moonray_frame_range_existing_usd/render/moonray_seq.0001.exr
+/tmp/moonray_frame_range_existing_usd/render/moonray_seq.0002.exr
+/tmp/moonray_frame_range_existing_usd/render/moonray_seq.0003.exr
+/tmp/moonray_frame_range_existing_usd/render/moonray_seq.0004.exr
+/tmp/moonray_frame_range_existing_usd/render/moonray_seq.0005.exr
+```
+
+All five files were valid nonconstant RGB float EXRs. The render launched a
+separate `syncId:1` render per frame and did not reproduce the reported
+single-render `syncId:1`, resolution-change, `syncId:2/3/4` restart sequence.
+That restart sequence remains a GUI/runtime observation to investigate with a
+normal H20.5 session, especially with viewport/IPR active versus inactive.
+
+Stage-driven range mode was also checked against
+`/Users/j7s/houdini-projects/simple-render-test/stage/stagetest-2.usda`, whose
+root layer metadata contains `startTimeCode = 1` and `endTimeCode = 5`. With
+the owned ROP set to `trange = stage`, H20.5 rendered frames `1-5`, wrote no
+frames `6-7`, and produced valid nonconstant RGB float EXRs.
+
+### EXR Metadata Observations
+
+Current MoonRay/Husk output still records only generic color metadata such as
+`oiio:ColorSpace = "Linear"` for the tested EXRs. It does not currently prove
+specific ACEScg, Linear Rec.709, or Linear Rec.2020 EXR chromaticities/OCIO
+metadata in the DCC wrapper layer.
+
+Several tested EXRs also contain suspicious `renderTime_s` and `renderMemory_s`
+values, such as render times far longer than the observed render wall time. Local
+source inspection points to MoonRay/Husk/image-writing metadata paths rather than
+the custom DCC ROP wrapper, so this audit records the issue but does not patch it
+in the DCC layer.
 
 ### Lifecycle Scenario Summary
 

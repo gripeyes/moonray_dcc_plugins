@@ -52,6 +52,10 @@ def check(name: str, condition: bool, details: object) -> None:
         fail(name, details)
 
 
+def disable_when(parm: hou.Parm) -> str | None:
+    return parm.parmTemplate().conditionals().get(hou.parmCondType.DisableWhen)
+
+
 def clear_scene() -> hou.Node:
     hou.hipFile.clear(suppress_save_prompt=True)
     stage = hou.node("/stage") or hou.node("/").createNode("lopnet", "stage")
@@ -388,6 +392,25 @@ def test_resolution_and_usd_contract() -> None:
         beauty_template.label() if beauty_template is not None else None,
     )
     check("production_aov_folder_removed", '"aovs"' not in ptg_text, "no production AOV folder token")
+    sampling_mode_template = node.parm("sceneVariable_sampling_mode").parmTemplate()
+    light_sampling_mode_template = node.parm("sceneVariable_light_sampling_mode").parmTemplate()
+    sampling_mode_items = sampling_mode_template.menuItems()
+    light_sampling_mode_items = light_sampling_mode_template.menuItems()
+    check("sampling_menu_items", sampling_mode_items == ("uniform", "adaptive"), sampling_mode_items)
+    check("light_sampling_menu_items", light_sampling_mode_items == ("uniform", "adaptive"), light_sampling_mode_items)
+    uniform_token, adaptive_token = sampling_mode_items
+    _, light_adaptive_token = light_sampling_mode_items
+    sampling_conditions = {
+        "sceneVariable_pixel_samples": "{ sceneVariable_sampling_mode != %s }" % uniform_token,
+        "sceneVariable_min_adaptive_samples": "{ sceneVariable_sampling_mode != %s }" % adaptive_token,
+        "sceneVariable_max_adaptive_samples": "{ sceneVariable_sampling_mode != %s }" % adaptive_token,
+        "sceneVariable_target_adaptive_error": "{ sceneVariable_sampling_mode != %s }" % adaptive_token,
+        "sceneVariable_light_sampling_quality": "{ sceneVariable_light_sampling_mode != %s }" % light_adaptive_token,
+    }
+    for parm_name, expected in sampling_conditions.items():
+        parm = node.parm(parm_name)
+        actual = disable_when(parm) if parm is not None else None
+        check("sampling_disablewhen_" + parm_name, actual == expected, actual)
 
     node.parm("camera").set("/cameras/camera1")
     node.parm("resolutionx").set(512)
@@ -412,6 +435,36 @@ def test_resolution_and_usd_contract() -> None:
     }
     for test_name, ok in default_checks.items():
         check("usd_default_contract_" + test_name, ok, usd_path)
+
+    node.parm("sceneVariable_sampling_mode").set(1)
+    node.parm("sceneVariable_min_adaptive_samples").set(3)
+    node.parm("sceneVariable_max_adaptive_samples").set(99)
+    node.parm("sceneVariable_target_adaptive_error").set(7)
+    node.cook(force=True)
+    adaptive_usd_path = os.path.join(tempfile.gettempdir(), "moonray_render_settings_lifecycle_validation_adaptive.usda")
+    node.stage().Flatten().Export(adaptive_usd_path)
+    adaptive_text = open(adaptive_usd_path, "r", encoding="utf-8").read()
+    adaptive_checks = {
+        "sampling_mode_adaptive": 'custom token moonray:sceneVariable:sampling_mode = "adaptive"' in adaptive_text,
+        "min_adaptive_samples": "custom int moonray:sceneVariable:min_adaptive_samples = 3" in adaptive_text,
+        "max_adaptive_samples": "custom int moonray:sceneVariable:max_adaptive_samples = 99" in adaptive_text,
+        "target_adaptive_error": "custom float moonray:sceneVariable:target_adaptive_error = 7" in adaptive_text,
+        "pixel_samples_still_authored": "custom int moonray:sceneVariable:pixel_samples = 8" in adaptive_text,
+    }
+    for test_name, ok in adaptive_checks.items():
+        check("usd_sampling_toggle_" + test_name, ok, adaptive_usd_path)
+
+    node.parm("sceneVariable_sampling_mode").set(0)
+    node.cook(force=True)
+    uniform_usd_path = os.path.join(tempfile.gettempdir(), "moonray_render_settings_lifecycle_validation_uniform.usda")
+    node.stage().Flatten().Export(uniform_usd_path)
+    uniform_text = open(uniform_usd_path, "r", encoding="utf-8").read()
+    uniform_checks = {
+        "sampling_mode_uniform": 'custom token moonray:sceneVariable:sampling_mode = "uniform"' in uniform_text,
+        "adaptive_values_preserved_but_inactive": "custom int moonray:sceneVariable:max_adaptive_samples = 99" in uniform_text,
+    }
+    for test_name, ok in uniform_checks.items():
+        check("usd_sampling_toggle_" + test_name, ok, uniform_usd_path)
 
     node.parm("aov_beauty").set(0)
     node.cook(force=True)
