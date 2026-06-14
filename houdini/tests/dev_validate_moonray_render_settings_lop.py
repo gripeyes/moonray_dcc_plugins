@@ -79,18 +79,46 @@ def owned_rops(parent: hou.Node):
     return [rop for rop in usd_render_rops(parent) if rop.userData(OWNER_OPERATOR_KEY) == OPERATOR_TYPE]
 
 
+def rop_loppath_target(rop: hou.Node):
+    parm = rop.parm("loppath")
+    if parm is None:
+        return None
+    value = parm.eval()
+    if value.startswith("/"):
+        target = hou.node(value)
+    else:
+        target = rop.node(value)
+        if target is None and rop.parent() is not None:
+            target = rop.parent().node(value)
+    return target.path() if target is not None else value
+
+
 def rop_info(rop: hou.Node):
-    return {
+    info = {
         "path": rop.path(),
         "input0": rop.input(0).path() if rop.input(0) is not None else None,
         "renderer": rop.parm("renderer").eval() if rop.parm("renderer") else None,
         "loppath": rop.parm("loppath").eval() if rop.parm("loppath") else None,
+        "loppath_target": rop_loppath_target(rop),
         "rendersettings": rop.parm("rendersettings").eval() if rop.parm("rendersettings") else None,
         "outputimage": rop.parm("outputimage").eval() if rop.parm("outputimage") else None,
         "owner_path": rop.userData(OWNER_LOP_KEY),
         "owner_operator": rop.userData(OWNER_OPERATOR_KEY),
         "owner_session": rop.userData(OWNER_SESSION_KEY),
     }
+    for name in ("loppath", "rendersettings", "outputimage"):
+        parm = rop.parm(name)
+        if parm is None:
+            continue
+        try:
+            info[name + "_expr"] = parm.expression()
+        except hou.OperationFailed:
+            info[name + "_expr"] = None
+        try:
+            info[name + "_unexpanded"] = parm.unexpandedString()
+        except hou.OperationFailed:
+            info[name + "_unexpanded"] = None
+    return info
 
 
 def rop_graph_state(rop: hou.Node):
@@ -101,7 +129,7 @@ def rop_graph_state(rop: hou.Node):
 
 
 def owned_rop_for_node(node: hou.Node):
-    candidates = [rop for rop in owned_rops(node.parent()) if rop.parm("loppath") and rop.parm("loppath").eval() == node.path()]
+    candidates = [rop for rop in owned_rops(node.parent()) if rop_loppath_target(rop) == node.path()]
     return candidates
 
 
@@ -120,6 +148,24 @@ def assert_one_owned_rop(test_name: str, node: hou.Node):
     ok = len(rops) == 1 and rops[0].input(0) == node and rops[0].parm("renderer").eval() == RENDERER_TOKEN
     check(test_name, ok, [rop_info(rop) for rop in rops])
     return rops[0] if rops else None
+
+
+def assert_owned_rop_wiring(test_name: str, node: hou.Node, rop: hou.Node | None) -> None:
+    if rop is None:
+        fail(test_name, "no owned ROP")
+        return
+    info = rop_info(rop)
+    expected_settings_expr = 'chs("%s/render_settings_prim")' % node.path()
+    expected_output_expr = 'chs("%s/product_name")' % node.path()
+    ok = (
+        info.get("loppath_target") == node.path()
+        and info.get("loppath_expr") == 'opinput(".", 0)'
+        and info.get("rendersettings") == node.parm("render_settings_prim").eval()
+        and info.get("rendersettings_expr") == expected_settings_expr
+        and info.get("outputimage") == node.parm("product_name").eval()
+        and info.get("outputimage_expr") == expected_output_expr
+    )
+    check(test_name, ok, info)
 
 
 def test_module_and_hda() -> None:
@@ -153,11 +199,13 @@ def test_basic_creation_and_repair() -> hou.Node:
     node = create_settings(stage, "moonrayrendersettings1")
     check("node_creation", node.type().name() == OPERATOR_TYPE and not node.errors(), {"path": node.path(), "errors": node.errors()})
     rop = assert_one_owned_rop("one_owned_connected_usdrender_rop", node)
+    assert_owned_rop_wiring("owned_usdrender_rop_uses_lop_expressions", node, rop)
     check("no_out_usdrender_creation", len(out_usd_render_rops()) == before_out, {"before": before_out, "after": len(out_usd_render_rops())})
     before_repair = rop_graph_state(rop) if rop is not None else None
     press_repair(node)
     press_repair(node)
     rop = assert_one_owned_rop("repair_button_idempotency", node)
+    assert_owned_rop_wiring("repair_preserves_lop_expression_wiring", node, rop)
     after_repair = rop_graph_state(rop) if rop is not None else None
     check("initial_creation_matches_post_repair_graph", before_repair == after_repair, {"before": before_repair, "after": after_repair})
     return stage
@@ -181,20 +229,24 @@ def test_lifecycle_scenarios() -> None:
     node1.setName("moonraysettings_renamed")
     press_repair(node1)
     rop1 = assert_one_owned_rop("rename_owner_then_repair_updates_by_session", node1)
+    assert_owned_rop_wiring("rename_owner_then_repair_refreshes_expressions", node1, rop1)
 
     if rop1 is not None:
         rop1.setName("artist_renamed_rop")
         press_repair(node1)
         check("rename_owned_rop_then_repair_preserves_renamed_rop", rop1.name() == "artist_renamed_rop" and rop1.input(0) == node1, rop_info(rop1))
+        assert_owned_rop_wiring("rename_owned_rop_then_repair_keeps_expressions", node1, rop1)
 
         rop1.destroy()
         press_repair(node1)
         rop1 = assert_one_owned_rop("delete_owned_rop_then_repair_recreates", node1)
+        assert_owned_rop_wiring("delete_owned_rop_then_repair_recreates_expressions", node1, rop1)
 
     if rop1 is not None:
         rop1.setInput(0, None)
         press_repair(node1)
         check("disconnect_owned_rop_then_repair_rewires", rop1.input(0) == node1, rop_info(rop1))
+        assert_owned_rop_wiring("disconnect_owned_rop_then_repair_keeps_expressions", node1, rop1)
 
     # Raw HOM copy of only the LOP does not run OnCreated; this is an accepted limitation.
     copied_lop = hou.copyNodesTo((node1,), stage)[0]
@@ -214,7 +266,8 @@ def test_lifecycle_scenarios() -> None:
     check("duplicate_lop_rop_pair_raw_copy_non_destructive", len(copied_pair_lops) == 1 and len(copied_pair_rops) == 1, {"lops": [n.path() for n in copied_pair_lops], "rops": [rop_info(r) for r in copied_pair_rops]})
     if copied_pair_lops:
         press_repair(copied_pair_lops[0])
-        assert_one_owned_rop("duplicate_lop_rop_pair_repair_refreshes_ownership", copied_pair_lops[0])
+        copied_pair_rop = assert_one_owned_rop("duplicate_lop_rop_pair_repair_refreshes_ownership", copied_pair_lops[0])
+        assert_owned_rop_wiring("duplicate_lop_rop_pair_repair_refreshes_expressions", copied_pair_lops[0], copied_pair_rop)
 
     collision_stage = stage
     foreign = collision_stage.createNode(ROP_NODE_TYPE, "moonrayrendersettings1_usdrender")
@@ -261,6 +314,13 @@ def test_lifecycle_scenarios() -> None:
             details = {"exception": str(exc), "errors": loaded_settings.errors(), "warnings": loaded_settings.warnings()}
         after_change = len(usd_render_rops(loaded_stage))
         check("parameter_change_and_cook_no_extra_rops", before_change == after_change, {"before": before_change, "after": after_change, **details})
+        loaded_rops = owned_rop_for_node(loaded_settings)
+        follows_product = bool(loaded_rops) and loaded_rops[0].parm("outputimage").eval() == loaded_settings.parm("product_name").eval()
+        check(
+            "owned_rop_outputimage_follows_product_name",
+            follows_product,
+            {"rops": [rop_info(rop) for rop in loaded_rops], "product_name": loaded_settings.parm("product_name").eval()},
+        )
 
     skip("undo_redo_creation", "Houdini hython does not provide a reliable undo/redo UI event test for this lifecycle; validate manually in UI if needed.")
 

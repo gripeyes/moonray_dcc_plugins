@@ -178,7 +178,9 @@ Current custom authored paths:
 
 ## Render Product and Output Path Rules
 
-`RenderProduct.productName` is the final image output path authored by the custom LOP. `$F4` frame tokens are preserved in the authored USD and expand during render execution.
+`RenderProduct.productName` is the USD fallback image output path authored by the custom LOP. `$HIP`, `$HIPNAME`, `$OS`, and `$F4` are valid Houdini path tokens, but plain `husk` does not have the same node/project context as a Houdini USD Render ROP.
+
+For the owned MoonRay USD Render ROP, the ROP `outputimage` parameter is the primary output authority. It is linked to the LOP `product_name` parameter so Houdini expands the output path in the ROP/HIP context and passes a concrete `-o` path to `husk`.
 
 When the USD Render ROP `outputimage` override is blank, the RenderProduct output path wins. A Houdini 20.5 smoke test wrote:
 
@@ -187,6 +189,14 @@ When the USD Render ROP `outputimage` override is blank, the RenderProduct outpu
 ```
 
 That earlier smoke render was black, so it proved USD Render ROP wiring, RenderProduct output creation, and resolution/output path behavior only. The current H20.5 disk-output contract adds the default Beauty RenderVar/`orderedVars` path and has filled EXR proof; this evidence is scoped to Beauty and does not prove non-beauty AOV support.
+
+2026 output-path regression evidence:
+
+- Manual `husk -o /tmp/moonray_manual_husk_test2.exr` with `--settings /Render/rendersettings` writes a valid nonconstant 512x512 RGB float EXR.
+- Manual `husk` with an absolute `RenderProduct.productName = "/tmp/moonray_product_abs.exr"` and no `-o` writes a valid nonconstant EXR.
+- Manual `husk` with `RenderProduct.productName = "$HIP/render/$HIPNAME.$OS.$F4.exr"` and no `-o` writes `./render/untitled..0001.exr`, proving the fallback path is evaluated without the Houdini ROP/node context.
+- A Houdini LOP `usdrender_rop` with blank `outputimage` and absolute `RenderProduct.productName = "/tmp/moonray_product_fallback.exr"` writes a valid nonconstant EXR, proving productName fallback still works when the path is concrete.
+- The owned MoonRay ROP now links `outputimage` to the LOP `product_name`; a saved-HIP test wrote `/tmp/moonray_saved_hip_test/render/moonray_test.0001.exr`, not `untitled`.
 
 ## Generic Houdini Render Settings Boundary
 
@@ -332,28 +342,29 @@ Houdini 20.5 `husk --list-renderers` sees:
 - `HdMoonrayRendererPlugin (Moonray)`.
 - `HdMoonrayRendererDebugPlugin (Moonray (debug))`.
 
-Houdini 20.5 USD Render ROP menu shows Moonray. The smoke test used the LOP `usdrender_rop` path:
+Houdini 20.5 USD Render ROP menu shows Moonray. The repaired owned LOP `usdrender_rop` path uses:
 
 ```text
 renderer = HdMoonrayRendererPlugin
-loppath = /stage/moonrayrendersettings1
-rendersettings = /Render/rendersettings
-outputimage = ""
+loppath expression = opinput(".", 0)
+rendersettings expression = chs("<owning MoonRay Render Settings LOP>/render_settings_prim")
+outputimage expression = chs("<owning MoonRay Render Settings LOP>/product_name")
 ```
 
-Output path:
+Validated output paths:
 
 ```text
-/tmp/moonray_render_settings_alignment_after/rop_product.0001.exr
+/tmp/moonray_rop_output_override.exr
+/tmp/moonray_saved_hip_test/render/moonray_test.0001.exr
 ```
 
-The smoke output was black, so it should be treated as wiring/output creation evidence only.
+Both outputs were valid nonconstant 512x512 RGB float EXRs in H20.5. The socket disconnect message after successful file write remains shutdown noise for these batch renders, not an output-path failure.
 
 ## USD Render ROP Auto-Creation Policy
 
 The MoonRay Render Settings LOP intentionally auto-creates a matching USD Render ROP LOP node on node creation. This is part of the desired integrated artist workflow: creating the render settings node should immediately leave the offline render path ready to use.
 
-The custom LOP authors `/Render/rendersettings` and the RenderProduct controls the final image output path. The auto-created `usdrender_rop` LOP is an execution wrapper connected below the settings LOP and pointed at that authored RenderSettings prim. The ROP `outputimage` parameter is deliberately left blank so `RenderProduct.productName` remains the source of truth for output path and `$F4` behavior.
+The custom LOP authors `/Render/rendersettings` and `RenderProduct.productName`. The auto-created `usdrender_rop` LOP is an execution wrapper connected below the settings LOP and pointed at that authored RenderSettings prim. The ROP `outputimage` parameter is linked to the LOP `product_name` parameter so Houdini evaluates `$HIP`, `$HIPNAME`, `$OS`, and `$F4` in a real Houdini ROP/HIP context before launching `husk`.
 
 Houdini 20.5 ROP details:
 
@@ -361,9 +372,9 @@ Houdini 20.5 ROP details:
 Context: same LOP network as the MoonRay Render Settings LOP
 Node type: usdrender_rop
 renderer = HdMoonrayRendererPlugin
-loppath = <current MoonRay Render Settings LOP path>
-rendersettings = /Render/rendersettings
-outputimage = ""
+loppath = opinput(".", 0)
+rendersettings = chs("<current MoonRay Render Settings LOP>/render_settings_prim")
+outputimage = chs("<current MoonRay Render Settings LOP>/product_name")
 ```
 
 Ownership is recorded on the ROP with userData:
@@ -644,9 +655,9 @@ Owned ROP values:
 
 ```text
 renderer = HdMoonrayRendererPlugin
-loppath = <owning MoonRay Render Settings LOP path>
-rendersettings = /Render/rendersettings
-outputimage = ""
+loppath = opinput(".", 0)
+rendersettings = chs("<owning MoonRay Render Settings LOP>/render_settings_prim")
+outputimage = chs("<owning MoonRay Render Settings LOP>/product_name")
 ```
 
 Ownership userData keys:
@@ -692,9 +703,9 @@ Expected initial creation behavior:
 - Create exactly one owned connected LOP `usdrender_rop`.
 - Connect it below the owning MoonRay Render Settings LOP.
 - Set `renderer = HdMoonrayRendererPlugin`.
-- Set `loppath` to the owning MoonRay Render Settings LOP path.
-- Set `rendersettings = /Render/rendersettings`.
-- Leave `outputimage` blank so `RenderProduct.productName` remains the output path source of truth.
+- Set `loppath` to `opinput(".", 0)`, normalized by validation to the owning MoonRay Render Settings LOP path.
+- Set `rendersettings` to `chs("<owning LOP>/render_settings_prim")`.
+- Set `outputimage` to `chs("<owning LOP>/product_name")` so the owned ROP passes a concrete output path to `husk`.
 - Do not create `/out/usdrender`.
 - Do not overwrite unrelated `usdrender_rop` nodes.
 

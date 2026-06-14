@@ -209,6 +209,20 @@ def _safe_node_name(name):
     return "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in name)
 
 
+def _rop_loppath_target(rop):
+    parm = rop.parm("loppath")
+    if parm is None:
+        return None
+    value = parm.eval()
+    if value.startswith("/"):
+        target = hou.node(value)
+    else:
+        target = rop.node(value)
+        if target is None and rop.parent() is not None:
+            target = rop.parent().node(value)
+    return target.path() if target is not None else value
+
+
 def _owned_rop_for_lop(lop_node):
     parent = lop_node.parent()
     if parent is None:
@@ -227,7 +241,7 @@ def _owned_rop_for_lop(lop_node):
             return rop
         if rop.userData(ROP_OWNER_SESSION_KEY) == lop_session_id:
             fallback_by_session = rop
-        elif rop.parm("loppath") is not None and rop.parm("loppath").eval() == lop_path:
+        elif _rop_loppath_target(rop) == lop_path:
             fallback_by_path = rop
     return fallback_by_session or fallback_by_path
 
@@ -251,27 +265,44 @@ def _create_owned_rop(lop_node):
     return parent.createNode(ROP_NODE_TYPE, base_name)
 
 
+def _set_hscript_expression(parm, expression):
+    try:
+        parm.setExpression(expression, language=hou.scriptLanguage.Hscript)
+    except TypeError:
+        parm.setExpression(expression)
+
+
+def _chs_expression(node, parm_name):
+    return 'chs("%s/%s")' % (node.path(), parm_name)
+
+
 def create_or_update_usd_render_rop(lop_node=None):
     """Create or update the USD Render ROP owned by this MoonRay Render Settings LOP."""
 
     lop_node = lop_node or hou.pwd()
     rop = _owned_rop_for_lop(lop_node) or _create_owned_rop(lop_node)
 
-    settings_prim = _path(lop_node, "render_settings_prim", RENDER_SETTINGS_PRIM)
-    for parm_name, value in (
-        ("renderer", ROP_RENDERER_TOKEN),
-        ("loppath", lop_node.path()),
-        ("rendersettings", settings_prim),
-        ("outputimage", ""),
-    ):
-        parm = rop.parm(parm_name)
-        if parm is not None:
-            parm.set(value)
-
     try:
         rop.setInput(0, lop_node)
     except hou.OperationFailed:
         pass
+
+    renderer = rop.parm("renderer")
+    if renderer is not None:
+        renderer.set(ROP_RENDERER_TOKEN)
+
+    loppath = rop.parm("loppath")
+    if loppath is not None:
+        _set_hscript_expression(loppath, 'opinput(".", 0)')
+
+    render_settings = rop.parm("rendersettings")
+    if render_settings is not None:
+        _set_hscript_expression(render_settings, _chs_expression(lop_node, "render_settings_prim"))
+
+    output_image = rop.parm("outputimage")
+    if output_image is not None:
+        _set_hscript_expression(output_image, _chs_expression(lop_node, "product_name"))
+
     try:
         rop.setPosition(lop_node.position() + hou.Vector2(0, -1.0))
     except hou.OperationFailed:
