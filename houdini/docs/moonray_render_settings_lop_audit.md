@@ -178,9 +178,9 @@ Current custom authored paths:
 
 ## Render Product and Output Path Rules
 
-`RenderProduct.productName` is the USD fallback image output path authored by the custom LOP. `$HIP`, `$HIPNAME`, `$OS`, and `$F4` are valid Houdini path tokens, but plain `husk` does not have the same node/project context as a Houdini USD Render ROP.
+`RenderProduct.productName` is the USD fallback image output path authored by the custom LOP. `$HIP`, `$HIPNAME`, `$OS`, and `$F4` are valid Houdini path tokens, but plain `husk` does not have the same node/project context as a Houdini USD Render ROP. The default custom LOP path escapes the frame token as `\$F4` so the filename remains frame-expandable for husk/ROP execution without making the Render Settings LOP itself time-dependent on the current Houdini frame.
 
-For the owned MoonRay USD Render ROP, the ROP `outputimage` parameter is the primary output authority. It is linked to the LOP `product_name` parameter so Houdini expands the output path in the ROP/HIP context and passes a concrete `-o` path to `husk`.
+For the owned MoonRay USD Render ROP, the ROP `outputimage` parameter is the primary output authority. It is linked to the LOP `product_name` parameter with a raw backtick HScript string expression so Houdini evaluates `$HIP`, `$HIPNAME`, and `$OS` in the ROP/HIP context while preserving the escaped frame token for husk frame expansion.
 
 When the USD Render ROP `outputimage` override is blank, the RenderProduct output path wins. A Houdini 20.5 smoke test wrote:
 
@@ -197,6 +197,7 @@ That earlier smoke render was black, so it proved USD Render ROP wiring, RenderP
 - Manual `husk` with `RenderProduct.productName = "$HIP/render/$HIPNAME.$OS.$F4.exr"` and no `-o` writes `./render/untitled..0001.exr`, proving the fallback path is evaluated without the Houdini ROP/node context.
 - A Houdini LOP `usdrender_rop` with blank `outputimage` and absolute `RenderProduct.productName = "/tmp/moonray_product_fallback.exr"` writes a valid nonconstant EXR, proving productName fallback still works when the path is concrete.
 - The owned MoonRay ROP now links `outputimage` to the LOP `product_name`; a saved-HIP test wrote `/tmp/moonray_saved_hip_test/render/moonray_test.0001.exr`, not `untitled`.
+- A later time-dependency audit showed that raw `$F4` in the custom LOP `product_name` makes the Render Settings LOP time-dependent. Escaping the default as `\$F4` keeps the frame placeholder for the ROP/husk filename but prevents unintended LOP time dependency. The owned ROP uses raw backtick strings such as `` `chs("<owning LOP>/product_name")` `` rather than `parm.setExpression()`, so repair/creation does not create expression keyframes on the owned ROP parms.
 
 ## Generic Houdini Render Settings Boundary
 
@@ -280,13 +281,18 @@ The current H20.5 source and documentation split sampling controls by mode:
   `light_sampling_quality` is active only in adaptive light sampling mode.
 
 Houdini menu conditionals for this generated HDA use the custom LOP menu token
-strings, not native MoonRay enum integer values and not HOM `eval()` integers.
-The menu items are `("uniform", "adaptive")`. The custom LOP therefore disables:
+strings, not native MoonRay enum integer values. The HDA menu items are
+`("uniform", "adaptive")`. The custom LOP therefore disables:
 
 - `Pixel Samples` when `sceneVariable_sampling_mode != "uniform"`.
 - `Min Adaptive Samples`, `Max Adaptive Samples`, and `Target Adaptive Error`
   when `sceneVariable_sampling_mode != "adaptive"`.
 - `Light Sampling Quality` when `sceneVariable_light_sampling_mode != "adaptive"`.
+
+The installed hdMoonray viewport DS uses integer parameters and numeric
+disable-when expressions for Display Options. Do not blindly copy those numeric
+conditions into the generated custom HDA: the previous numeric-condition attempt
+passed a headless HOM probe but regressed the graphical H20.5 custom LOP UI.
 
 Headless Hython validation can inspect the conditional strings, but it does not
 prove the graphical disabled/greyed-out state. Fresh H20.5 GUI validation should
@@ -297,6 +303,14 @@ control is inactive for the selected mode. Validation shows changing sampling
 values and toggling `Sampling Mode` updates the exported USD without requiring a
 manual dropdown refresh. The inactive values are retained as SceneVariables, but
 the UI now communicates which controls are relevant for the selected mode.
+
+Do not add sampling `moonray:sceneVariable:*` keys to
+`hdMoonray::RenderSettings::addDescriptors()` as a live-update workaround.
+OpenUSD's `HdRenderSettingDescriptor` is a renderer-exported setting descriptor
+used by hosts for UI/defaults, and adding these descriptors regressed Houdini
+Display Options initialization. The custom LOP should author the USD
+RenderSettings attrs; the viewport Display Options should continue to use the
+existing DS-declared `sceneVariable_*` controls.
 
 ## Beauty RenderVar and AOV Status
 
@@ -444,7 +458,7 @@ Houdini 20.5 USD Render ROP menu shows Moonray. The repaired owned LOP `usdrende
 renderer = HdMoonrayRendererPlugin
 loppath expression = opinput(".", 0)
 rendersettings expression = chs("<owning MoonRay Render Settings LOP>/render_settings_prim")
-outputimage expression = chs("<owning MoonRay Render Settings LOP>/product_name")
+outputimage raw string = `chs("<owning MoonRay Render Settings LOP>/product_name")`
 ```
 
 Validated output paths:
@@ -460,7 +474,7 @@ Both outputs were valid nonconstant 512x512 RGB float EXRs in H20.5. The socket 
 
 The MoonRay Render Settings LOP intentionally auto-creates a matching USD Render ROP LOP node on node creation. This is part of the desired integrated artist workflow: creating the render settings node should immediately leave the offline render path ready to use.
 
-The custom LOP authors `/Render/rendersettings` and `RenderProduct.productName`. The auto-created `usdrender_rop` LOP is an execution wrapper connected below the settings LOP and pointed at that authored RenderSettings prim. The ROP `outputimage` parameter is linked to the LOP `product_name` parameter so Houdini evaluates `$HIP`, `$HIPNAME`, `$OS`, and `$F4` in a real Houdini ROP/HIP context before launching `husk`.
+The custom LOP authors `/Render/rendersettings` and `RenderProduct.productName`. The auto-created `usdrender_rop` LOP is an execution wrapper connected below the settings LOP and pointed at that authored RenderSettings prim. The ROP `outputimage` parameter is linked to the LOP `product_name` parameter so Houdini evaluates `$HIP`, `$HIPNAME`, and `$OS` in a real Houdini ROP/HIP context before launching `husk`; the default frame token is escaped as `\$F4` so it stays scoped to filename/frame expansion and does not mark the custom LOP itself time-dependent.
 
 Houdini 20.5 ROP details:
 
@@ -470,7 +484,7 @@ Node type: usdrender_rop
 renderer = HdMoonrayRendererPlugin
 loppath = opinput(".", 0)
 rendersettings = chs("<current MoonRay Render Settings LOP>/render_settings_prim")
-outputimage = chs("<current MoonRay Render Settings LOP>/product_name")
+outputimage raw string = `chs("<current MoonRay Render Settings LOP>/product_name")`
 ```
 
 Ownership is recorded on the ROP with userData:
@@ -621,7 +635,7 @@ Current exposed/custom-authored settings after discovery:
 | Output / Product | RenderSettings Primitive Path | `render_settings_prim` | RenderSettings prim path | path | `/Render/rendersettings` | H20.5 Generic/Karma pattern | validated previously |
 | Output / Product | RenderProducts Parent Primitive Path | `render_products_parent_prim` | RenderProduct parent path | path | `/Render/Products` | H20.5 Karma pattern | validated previously |
 | Output / Product | RenderVars Parent Primitive Path | `render_vars_parent_prim` | RenderVar parent path | path | `/Render/Products/Vars` | H20.5 Karma pattern | validated previously |
-| Output / Product | Output Picture | `product_name` | `RenderProduct.productName` | token | `$HIP/render/$HIPNAME.$OS.$F4.exr` | USD RenderProduct / H20.5 Karma pattern | validated previously |
+| Output / Product | Output Picture | `product_name` | `RenderProduct.productName` | token | `$HIP/render/$HIPNAME.$OS.\$F4.exr` | USD RenderProduct / H20.5 Karma pattern | Escaped frame token prevents unintended LOP time dependency while preserving frame expansion for ROP/husk. |
 | Camera / Resolution | Camera | `camera` | `RenderSettings.camera` relationship | rel | `/cameras/camera1` | H20.5 Karma pattern | validated previously |
 | Camera / Resolution | Resolution Mode | `resolution_mode_note` | UI note only | n/a | Manual Resolution | H20.5 lifecycle cleanup decision | computed modes intentionally removed |
 | Camera / Resolution | Resolution | `resolution` | `RenderSettings.resolution` | `int2` | `1920, 1080` | USD RenderSettings | validated previously |
@@ -754,7 +768,7 @@ Owned ROP values:
 renderer = HdMoonrayRendererPlugin
 loppath = opinput(".", 0)
 rendersettings = chs("<owning MoonRay Render Settings LOP>/render_settings_prim")
-outputimage = chs("<owning MoonRay Render Settings LOP>/product_name")
+outputimage raw string = `chs("<owning MoonRay Render Settings LOP>/product_name")`
 ```
 
 Ownership userData keys:
@@ -802,7 +816,7 @@ Expected initial creation behavior:
 - Set `renderer = HdMoonrayRendererPlugin`.
 - Set `loppath` to `opinput(".", 0)`, normalized by validation to the owning MoonRay Render Settings LOP path.
 - Set `rendersettings` to `chs("<owning LOP>/render_settings_prim")`.
-- Set `outputimage` to `chs("<owning LOP>/product_name")` so the owned ROP passes a concrete output path to `husk`.
+- Set `outputimage` to the raw string `` `chs("<owning LOP>/product_name")` `` so the owned ROP follows the LOP output path without creating expression keyframes.
 - Do not create `/out/usdrender`.
 - Do not overwrite unrelated `usdrender_rop` nodes.
 

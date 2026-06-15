@@ -129,6 +129,10 @@ def rop_info(rop: hou.Node):
         if parm is None:
             continue
         try:
+            info[name + "_raw"] = parm.rawValue()
+        except hou.OperationFailed:
+            info[name + "_raw"] = None
+        try:
             info[name + "_expr"] = parm.expression()
         except hou.OperationFailed:
             info[name + "_expr"] = None
@@ -136,6 +140,14 @@ def rop_info(rop: hou.Node):
             info[name + "_unexpanded"] = parm.unexpandedString()
         except hou.OperationFailed:
             info[name + "_unexpanded"] = None
+        try:
+            info[name + "_keyframes"] = len(parm.keyframes())
+        except hou.OperationFailed:
+            info[name + "_keyframes"] = None
+        try:
+            info[name + "_time_dependent"] = parm.isTimeDependent()
+        except hou.OperationFailed:
+            info[name + "_time_dependent"] = None
     return info
 
 
@@ -173,15 +185,22 @@ def assert_owned_rop_wiring(test_name: str, node: hou.Node, rop: hou.Node | None
         fail(test_name, "no owned ROP")
         return
     info = rop_info(rop)
-    expected_settings_expr = 'chs("%s/render_settings_prim")' % node.path()
-    expected_output_expr = 'chs("%s/product_name")' % node.path()
+    expected_loppath_raw = '`opinput(".", 0)`'
+    expected_settings_raw = '`chs("%s/render_settings_prim")`' % node.path()
+    expected_output_raw = '`chs("%s/product_name")`' % node.path()
     ok = (
         info.get("loppath_target") == node.path()
-        and info.get("loppath_expr") == 'opinput(".", 0)'
+        and info.get("loppath_raw") == expected_loppath_raw
+        and info.get("loppath_keyframes") == 0
+        and info.get("loppath_time_dependent") is False
         and info.get("rendersettings") == node.parm("render_settings_prim").eval()
-        and info.get("rendersettings_expr") == expected_settings_expr
+        and info.get("rendersettings_raw") == expected_settings_raw
+        and info.get("rendersettings_keyframes") == 0
+        and info.get("rendersettings_time_dependent") is False
         and info.get("outputimage") == node.parm("product_name").eval()
-        and info.get("outputimage_expr") == expected_output_expr
+        and info.get("outputimage_raw") == expected_output_raw
+        and info.get("outputimage_keyframes") == 0
+        and info.get("outputimage_time_dependent") is False
     )
     check(test_name, ok, info)
 
@@ -227,6 +246,16 @@ def test_basic_creation_and_repair() -> hou.Node:
     before_out = len(out_usd_render_rops())
     node = create_settings(stage, "moonrayrendersettings1")
     check("node_creation", node.type().name() == OPERATOR_TYPE and not node.errors(), {"path": node.path(), "errors": node.errors()})
+    product_name = node.parm("product_name")
+    check(
+        "default_product_name_not_time_dependent",
+        product_name is not None and product_name.rawValue().endswith("\\$F4.exr") and not product_name.isTimeDependent(),
+        {
+            "raw": product_name.rawValue() if product_name else None,
+            "eval": product_name.eval() if product_name else None,
+            "time_dependent": product_name.isTimeDependent() if product_name else None,
+        },
+    )
     rop = assert_one_owned_rop("one_owned_connected_usdrender_rop", node)
     assert_owned_rop_wiring("owned_usdrender_rop_uses_lop_expressions", node, rop)
     check("no_out_usdrender_creation", len(out_usd_render_rops()) == before_out, {"before": before_out, "after": len(out_usd_render_rops())})
@@ -335,7 +364,7 @@ def test_lifecycle_scenarios() -> None:
         skip("parameter_change_and_cook_no_extra_rops", "no loaded MoonRay Render Settings node found")
     else:
         before_change = len(usd_render_rops(loaded_stage))
-        loaded_settings.parm("product_name").set("/tmp/moonray_lifecycle.$F4.exr")
+        loaded_settings.parm("product_name").set("/tmp/moonray_lifecycle.\\$F4.exr")
         try:
             loaded_settings.cook(force=True)
             details = {"errors": loaded_settings.errors(), "warnings": loaded_settings.warnings()}

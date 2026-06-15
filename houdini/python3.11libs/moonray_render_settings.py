@@ -14,7 +14,7 @@ RENDER_PRODUCTS_PARENT_PRIM = "/Render/Products"
 RENDER_VARS_PARENT_PRIM = "/Render/Products/Vars"
 RENDER_PRODUCT_NAME = "renderproduct"
 BEAUTY_RENDER_VAR_NAME = "beauty"
-PRODUCT_NAME = "$HIP/render/$HIPNAME.$OS.$F4.exr"
+PRODUCT_NAME = "$HIP/render/$HIPNAME.$OS.\\$F4.exr"
 DEFAULT_RESOLUTION = (1920, 1080)
 ROP_NODE_TYPE = "usdrender_rop"
 ROP_RENDERER_TOKEN = "HdMoonrayRendererPlugin"
@@ -447,11 +447,14 @@ def _create_owned_rop(lop_node):
     return parent.createNode(ROP_NODE_TYPE, base_name)
 
 
-def _set_hscript_expression(parm, expression):
+def _set_hscript_string_expression(parm, expression):
+    value = "`%s`" % expression
     try:
-        parm.setExpression(expression, language=hou.scriptLanguage.Hscript)
-    except TypeError:
-        parm.setExpression(expression)
+        if parm.rawValue() == value:
+            return
+    except hou.OperationFailed:
+        pass
+    parm.set(value)
 
 
 def _chs_expression(node, parm_name):
@@ -475,15 +478,15 @@ def create_or_update_usd_render_rop(lop_node=None):
 
     loppath = rop.parm("loppath")
     if loppath is not None:
-        _set_hscript_expression(loppath, 'opinput(".", 0)')
+        _set_hscript_string_expression(loppath, 'opinput(".", 0)')
 
     render_settings = rop.parm("rendersettings")
     if render_settings is not None:
-        _set_hscript_expression(render_settings, _chs_expression(lop_node, "render_settings_prim"))
+        _set_hscript_string_expression(render_settings, _chs_expression(lop_node, "render_settings_prim"))
 
     output_image = rop.parm("outputimage")
     if output_image is not None:
-        _set_hscript_expression(output_image, _chs_expression(lop_node, "product_name"))
+        _set_hscript_string_expression(output_image, _chs_expression(lop_node, "product_name"))
 
     try:
         rop.setPosition(lop_node.position() + hou.Vector2(0, -1.0))
