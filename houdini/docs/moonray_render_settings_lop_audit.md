@@ -312,6 +312,43 @@ Display Options initialization. The custom LOP should author the USD
 RenderSettings attrs; the viewport Display Options should continue to use the
 existing DS-declared `sceneVariable_*` controls.
 
+## Native MoonRay SpotLight Toggle Time Dependency
+
+The Light LOP MoonRay tab exposes `Enable Native MoonRay SpotLight` from the
+Houdini renderer-property DS files:
+
+```text
+houdini/soho/parameters/HdMoonrayRendererPlugin_Light.ds
+houdini/soho/parameters/moonray_Light.ds
+```
+
+That toggle is a convenience wrapper around the generated MoonRay class override
+parameters:
+
+```text
+xn__moonrayclass_control_o8a = set
+xn__moonrayclass_nva = SpotLight
+```
+
+`xn__moonrayclass_nva` has a generated Python-expression default that derives the
+MoonRay light class from the Houdini light type. The native-SpotLight callback
+must replace that generated expression with a static `SpotLight` token without
+leaving keyframes, expressions, helper user data, or USD time samples behind.
+Earlier callback variants also wrote `moonray_native_spotlight_helper` node user
+data; that bookkeeping was removed because Houdini can draw green network badges
+for non-keyframe node data as well as for true time-dependency. H20.5 hython
+validation executes the exact callback text and checks:
+
+- the Light LOP remains non-time-dependent;
+- the native SpotLight toggle, class-control parm, and class parm have static
+  values after enable;
+- `xn__moonrayclass_nva` has no expression and no keyframes after enable;
+- no `moonray_native_spotlight_helper` user data is written;
+- the flattened USD layer has no time-sampled attributes before or after enable.
+
+The static class value is ignored when the control parm is reset to `none`, so
+disabling the helper does not author a MoonRay class override.
+
 ## Beauty RenderVar and AOV Status
 
 The H20.5 USD Render ROP / husk disk-output workflow now authors a Beauty RenderVar by default. A

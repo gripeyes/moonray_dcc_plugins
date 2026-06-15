@@ -13,7 +13,7 @@ import subprocess
 import tempfile
 
 import hou
-from pxr import UsdRender
+from pxr import Usd, UsdRender
 
 OPERATOR_TYPE = "Lop::DW_MOONRAY::moonrayrendersettings::1"
 ROP_NODE_TYPE = "usdrender_rop"
@@ -718,12 +718,83 @@ def test_rdla_receipt() -> None:
     check("rdla_scenevariable_receipt", ok, rdla_path)
 
 
+def _time_sampled_attrs(stage: Usd.Stage) -> list[tuple[str, str, tuple[float, ...]]]:
+    samples = []
+    for prim in stage.Traverse():
+        for attr in prim.GetAttributes():
+            times = attr.GetTimeSamples()
+            if times:
+                samples.append((str(prim.GetPath()), attr.GetName(), tuple(times)))
+    return samples
+
+
+def test_native_spotlight_toggle_is_static() -> None:
+    stage = clear_scene()
+    light = stage.createNode("light", "moonray_spotlight_static_probe")
+    light.cook(force=True)
+
+    enable = light.parm("xn__moonraynative_spotlight_rqa")
+    control = light.parm("xn__moonrayclass_control_o8a")
+    klass = light.parm("xn__moonrayclass_nva")
+    if enable is None or control is None or klass is None:
+        skip("native_spotlight_static_toggle", "MoonRay Light DS parameters are unavailable")
+        return
+
+    before_samples = _time_sampled_attrs(light.stage())
+    before_helper = light.userData("moonray_native_spotlight_helper")
+    callback = enable.parmTemplate().tags().get("script_callback")
+    if not callback:
+        fail("native_spotlight_static_toggle", "missing callback")
+        return
+
+    enable.set(1)
+    exec(callback, {"hou": hou}, {"kwargs": {"node": light, "parm": enable}})
+    light.cook(force=True)
+
+    try:
+        klass_expression = klass.expression()
+    except hou.OperationFailed:
+        klass_expression = None
+
+    after_samples = _time_sampled_attrs(light.stage())
+    after_helper = light.userData("moonray_native_spotlight_helper")
+    details = {
+        "node_time_dependent": light.isTimeDependent(),
+        "enable": enable.evalAsString(),
+        "control": control.evalAsString(),
+        "class": klass.evalAsString(),
+        "class_raw": klass.rawValue(),
+        "class_expression": klass_expression,
+        "class_keyframes": [(kf.frame(), kf.expression()) for kf in klass.keyframes()],
+        "before_helper_user_data": before_helper,
+        "after_helper_user_data": after_helper,
+        "before_time_samples": before_samples,
+        "after_time_samples": after_samples,
+    }
+    check(
+        "native_spotlight_static_toggle",
+        not light.isTimeDependent()
+        and enable.eval() == 1
+        and control.evalAsString() == "set"
+        and klass.evalAsString() == "SpotLight"
+        and klass.rawValue() == "SpotLight"
+        and klass_expression is None
+        and not klass.keyframes()
+        and before_helper is None
+        and after_helper is None
+        and not before_samples
+        and not after_samples,
+        details,
+    )
+
+
 def main() -> int:
     test_module_and_hda()
     test_basic_creation_and_repair()
     test_lifecycle_scenarios()
     test_manual_ui_creation_paths()
     test_resolution_and_usd_contract()
+    test_native_spotlight_toggle_is_static()
     test_rdla_receipt()
 
     counts = {"PASS": 0, "FAIL": 0, "SKIP": 0}

@@ -1124,7 +1124,7 @@
             default { "0" }
             help    "Forces this Solaris light to render as MoonRay's native SpotLight. Use this when you specifically want MoonRay projector-style controls such as inner/outer cone angles, lens radius, focal plane distance, aspect ratio, angle falloff, and black level. The standard Solaris Shaping tab remains the renderer-neutral USD ShapingAPI path."
             parmtag { "script_callback_language" "python" }
-            parmtag { "script_callback" "node = kwargs['node']; enabled = bool(kwargs['parm'].eval()); control = node.parm('xn__moonrayclass_control_o8a'); klass = node.parm('xn__moonrayclass_nva'); owner = node.userData('moonray_native_spotlight_helper');\nif enabled:\n    if control is not None and klass is not None:\n        control.set('set')\n        klass.set('SpotLight')\n        node.setUserData('moonray_native_spotlight_helper', '1')\nelse:\n    if owner == '1' and control is not None and klass is not None and control.evalAsString() == 'set' and klass.evalAsString() == 'SpotLight':\n        control.set('none')\n        node.destroyUserData('moonray_native_spotlight_helper')" }
+            parmtag { "script_callback" "node = kwargs['node']; enabled = bool(kwargs['parm'].eval()); control = node.parm('xn__moonrayclass_control_o8a'); klass = node.parm('xn__moonrayclass_nva');\nif enabled:\n    if control is not None and klass is not None:\n        control.set('set')\n        klass.deleteAllKeyframes()\n        klass.set('SpotLight')\nelse:\n    if control is not None and klass is not None and control.evalAsString() == 'set' and klass.evalAsString() == 'SpotLight':\n        control.set('none')\n        klass.deleteAllKeyframes()" }
         }
 
         parm {
