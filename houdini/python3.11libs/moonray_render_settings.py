@@ -21,6 +21,7 @@ ROP_RENDERER_TOKEN = "HdMoonrayRendererPlugin"
 ROP_OWNER_LOP_KEY = "moonray_render_settings_lop"
 ROP_OWNER_OPERATOR_KEY = "moonray_render_settings_operator"
 ROP_OWNER_SESSION_KEY = "moonray_render_settings_lop_session_id"
+CONTRACT_WARNING_KEY = "moonray_render_contract_warning"
 
 
 AOV_DEFINITIONS = (
@@ -219,6 +220,8 @@ SCENE_VARIABLES = (
     ("volume_phase_attenuation_factor", Sdf.ValueTypeNames.Float),
     ("volume_indirect_samples", Sdf.ValueTypeNames.Int),
     ("texture_blur", Sdf.ValueTypeNames.Float),
+    ("texture_cache_size", Sdf.ValueTypeNames.Int),
+    ("texture_file_handles", Sdf.ValueTypeNames.Int),
     ("pixel_filter_width", Sdf.ValueTypeNames.Float),
     ("pixel_filter", Sdf.ValueTypeNames.Token),
     ("enable_dof", Sdf.ValueTypeNames.Bool),
@@ -328,7 +331,12 @@ def author_from_node(node=None):
 
     width = int(_parm(node, "resolutionx", DEFAULT_RESOLUTION[0]))
     height = int(_parm(node, "resolutiony", DEFAULT_RESOLUTION[1]))
-    settings.CreateResolutionAttr().Set(Gf.Vec2i(width, height))
+    resolution = Gf.Vec2i(width, height)
+    pixel_aspect = float(_parm(node, "pixelAspectRatio", 1.0))
+    settings.CreateResolutionAttr().Set(resolution)
+    settings.CreatePixelAspectRatioAttr().Set(pixel_aspect)
+    product.CreateResolutionAttr().Set(resolution)
+    product.CreatePixelAspectRatioAttr().Set(pixel_aspect)
 
     product_name = _string_parm(node, "product_name", PRODUCT_NAME).strip() or PRODUCT_NAME
     product.CreateProductNameAttr().Set(product_name)
@@ -428,6 +436,71 @@ def _owned_rop_for_lop(lop_node):
     return fallback_by_session or fallback_by_path
 
 
+def _render_contract_paths(lop_node):
+    settings_path = _path(lop_node, "render_settings_prim", RENDER_SETTINGS_PRIM)
+    products_parent_path = _path(lop_node, "render_products_parent_prim", RENDER_PRODUCTS_PARENT_PRIM)
+    product_name = _string_parm(lop_node, "render_product_name", RENDER_PRODUCT_NAME).strip() or RENDER_PRODUCT_NAME
+    return settings_path, _child_path(products_parent_path, product_name)
+
+
+def _duplicate_render_contract_nodes(lop_node):
+    parent = lop_node.parent()
+    if parent is None:
+        return []
+    settings_path, product_path = _render_contract_paths(lop_node)
+    duplicates = []
+    for other in parent.children():
+        if other == lop_node or other.type().name() != OPERATOR_TYPE:
+            continue
+        try:
+            if other.isBypassed():
+                continue
+        except hou.OperationFailed:
+            pass
+        other_settings_path, other_product_path = _render_contract_paths(other)
+        if other_settings_path == settings_path or other_product_path == product_path:
+            duplicates.append(other)
+    return duplicates
+
+
+def _set_user_data_or_clear(node, key, value):
+    if value:
+        node.setUserData(key, value)
+        return
+    try:
+        node.destroyUserData(key)
+    except (AttributeError, hou.OperationFailed):
+        node.setUserData(key, "")
+
+
+def _refresh_render_contract_warnings(parent):
+    if parent is None:
+        return
+    for lop_node in parent.children():
+        if lop_node.type().name() != OPERATOR_TYPE:
+            continue
+        duplicates = _duplicate_render_contract_nodes(lop_node)
+        message = ""
+        if duplicates:
+            settings_path, product_path = _render_contract_paths(lop_node)
+            message = (
+                "WARNING: duplicate MoonRay Render Settings contract. "
+                "This node shares %s or %s with: %s"
+                % (settings_path, product_path, ", ".join(sorted(node.path() for node in duplicates)))
+            )
+        _set_user_data_or_clear(lop_node, CONTRACT_WARNING_KEY, message)
+        rop = _owned_rop_for_lop(lop_node)
+        if rop is not None:
+            comment = "Owned by %s (%s)." % (lop_node.path(), OPERATOR_TYPE)
+            if message:
+                comment += "\n" + message
+            rop.setComment(comment)
+            try:
+                rop.setGenericFlag(hou.nodeFlag.DisplayComment, True)
+            except hou.OperationFailed:
+                pass
+
+
 def _create_owned_rop(lop_node):
     parent = lop_node.parent()
     if parent is None:
@@ -501,6 +574,7 @@ def create_or_update_usd_render_rop(lop_node=None):
         rop.setGenericFlag(hou.nodeFlag.DisplayComment, True)
     except hou.OperationFailed:
         pass
+    _refresh_render_contract_warnings(lop_node.parent())
     return rop
 
 
@@ -729,7 +803,7 @@ def _build_parm_template_group():
         "Pixel Aspect Ratio",
         1,
         (1.0,),
-        help="Companion value used by Houdini's native resolution preset menu. Pixel aspect authoring is deferred.",
+        help="Companion value used by Houdini's native resolution preset menu. Authored on RenderSettings and RenderProduct for offline USD output consistency.",
     )
     pixel_aspect.hide(True)
     ptg.append(pixel_aspect)
@@ -1050,6 +1124,8 @@ def _build_parm_template_group():
 
     filtering = (
         _scene_float("texture_blur", "Texture Blur", 0.0, max_value=10, help_text="Adjusts the amount of texture filtering."),
+        _scene_int("texture_cache_size", "Texture Cache Size (MB)", 4000, max_value=131072, help_text="Maximum MoonRay texture cache size in megabytes. Lower values such as 2048 or 4096 can be useful on memory-constrained macOS systems."),
+        _scene_int("texture_file_handles", "Texture File Handles", 24000, max_value=65536, help_text="Maximum number of simultaneous open texture file handles used by MoonRay texture loading."),
         _scene_float("pixel_filter_width", "Pixel Filter Width", 3.0, max_value=10, help_text="The overall extents, in pixels, of the pixel filter."),
         _scene_menu(
             "pixel_filter",

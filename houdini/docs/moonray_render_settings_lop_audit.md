@@ -150,7 +150,7 @@ Before the source/install sync:
 
 After the source/install sync:
 
-- Installed runtime module has 50 SceneVariables.
+- Installed runtime module has 52 SceneVariables.
 - `enable_dof` is present.
 - `light_sampling_mode` is present.
 - Custom USD authors `custom bool moonray:sceneVariable:enable_dof = 0`.
@@ -223,6 +223,167 @@ Validated dimensions:
 - Manual: `512 x 256`.
 
 The custom LOP authors final numeric resolution as `RenderSettings.resolution`. It must not author `moonray:sceneVariable:image_width` or `moonray:sceneVariable:image_height`.
+
+### Parameter Authority Policy
+
+The custom MoonRay Render Settings LOP owns the default USD disk-output contract
+when it authors both `/Render/rendersettings` and `/Render/Products/renderproduct`.
+The policy is:
+
+- The LOP `resolution` tuple is the single source of truth for offline USD
+  Render ROP / husk resolution.
+- Because the node authors a RenderProduct, it must also author
+  `RenderProduct.resolution` to match `RenderSettings.resolution`. Leaving the
+  product resolution unauthored lets native/stale/default product opinions
+  conflict with the settings resolution, which can change render-pass aspect and
+  camera conform behavior.
+- `pixelAspectRatio` is a hidden companion parameter used by Houdini's native
+  resolution preset menu. When present, it must be authored consistently on both
+  RenderSettings and RenderProduct.
+- `RenderProduct.camera` is not authored by default; `RenderSettings.camera`
+  remains the camera authority for the default product.
+- `dataWindowNDC` and `aspectRatioConformPolicy` are left to Solaris/USD schema
+  defaults unless a dedicated user-facing control is added and validated.
+- Viewport/IPR pixel dimensions remain viewport-driven. This node must still
+  keep offline RenderSettings/Product metadata internally consistent so IPR temp
+  stages and USD Render ROP exports do not carry contradictory output aspects.
+
+H20.5 validation after the parameter-authority fix authored
+`RenderSettings.resolution = (1828, 1332)` and
+`RenderProduct.resolution = (1828, 1332)` from the same LOP tuple. It also
+authored `pixelAspectRatio = 1.0` on both prims. `dataWindowNDC` and
+`aspectRatioConformPolicy` resolved to USD schema fallback values
+`(0, 0, 1, 1)` and `expandAperture` with no authored opinion on either prim.
+
+### 2026 Camera / Product / Framing Alignment Audit
+
+This audit was started because 1:1 and other non-camera-aspect renders can
+look cropped or framed differently from the Houdini viewport/IPR when using the
+custom MoonRay Render Settings LOP plus its owned USD Render ROP.
+
+Evidence preserved before this audit:
+
+```text
+/tmp/moonray_camera_output_alignment_20260616_110950
+```
+
+Local source evidence:
+
+- Houdini 20.5 USD header
+  `/Applications/Houdini/Houdini20.5.584/Frameworks/Houdini.framework/Versions/Current/Resources/toolkit/include/pxr/usd/usdRender/product.h`
+  states that `UsdRenderProduct` inherits `UsdRenderSettingsBase` and provides
+  optional overrides to the owning `UsdRenderSettings` prim.
+- Houdini 20.5 USD header
+  `/Applications/Houdini/Houdini20.5.584/Frameworks/Houdini.framework/Versions/Current/Resources/toolkit/include/pxr/usd/usdRender/settingsBase.h`
+  defines `resolution`, `pixelAspectRatio`, `aspectRatioConformPolicy`,
+  `dataWindowNDC`, and `camera` on `UsdRenderSettingsBase`, so both
+  RenderSettings and RenderProduct can carry those opinions.
+- Houdini 20.5 HUSD header
+  `/Applications/Houdini/Houdini20.5.584/Frameworks/Houdini.framework/Versions/Current/Resources/toolkit/include/HUSD/XUSD_RenderSettings.h`
+  exposes product-level override hooks for camera path, resolution, pixel
+  aspect, and data window. It also says product values are true overrides only
+  when authored on the product.
+- Houdini 20.5 Hydra header
+  `/Applications/Houdini/Houdini20.5.584/Frameworks/Houdini.framework/Versions/Current/Resources/toolkit/include/pxr/imaging/hd/renderSettings.h`
+  carries flattened `HdRenderSettings::RenderProduct` data including
+  `cameraPath`, `resolution`, `pixelAspectRatio`, `aspectRatioConformPolicy`,
+  `apertureSize`, and `dataWindowNDC`.
+- Houdini 20.5 USD imaging header
+  `/Applications/Houdini/Houdini20.5.584/Frameworks/Houdini.framework/Versions/Current/Resources/toolkit/include/pxr/usdImaging/usdImaging/renderSettingsFlatteningSceneIndex.h`
+  describes a scene index that flattens RenderSettings, targeted Products, and
+  Vars into `HdRenderSettingsSchema` for Hydra backends.
+- hdMoonray source
+  `/Applications/MoonRay/source/openmoonray/moonray/hydra/hdMoonray/lib/hydramoonray/RenderPass.cc`
+  computes render aspect from `HdRenderPassState::GetFraming().dataWindow`
+  when valid, otherwise from viewport size, then calls
+  `Camera::setAsPrimaryCamera(renderDelegate, double(w)/h)`.
+- hdMoonray source
+  `/Applications/MoonRay/source/openmoonray/moonray/hydra/hdMoonray/lib/hydramoonray/Camera.cc`
+  adjusts the RDL camera using `CameraUtilConformedWindow`,
+  `HdCamera::GetWindowPolicy()`, and the desired image aspect. The current
+  path therefore depends on the camera/window policy and render-pass framing
+  that Hydra gives hdMoonray, not on the DCC Python directly applying a custom
+  crop.
+
+Temporary runtime probes, with no repo source edits, were written under:
+
+```text
+/tmp/moonray_product_camera_cases
+/tmp/moonray_aspect_marker_cases
+/Users/j7s/houdini-projects/sculpt-practice/render-test/moonray_alignment_case_A.txt
+/Users/j7s/houdini-projects/sculpt-practice/render-test/moonray_alignment_case_B.txt
+/Users/j7s/houdini-projects/sculpt-practice/render-test/moonray_alignment_case_C.txt
+/Users/j7s/houdini-projects/sculpt-practice/render-test/moonray_alignment_case_D.txt
+/Users/j7s/houdini-projects/sculpt-practice/render-test/moonray_alignment_case_E.txt
+/Users/j7s/houdini-projects/sculpt-practice/render-test/moonray_alignment_case_F.txt
+/Users/j7s/houdini-projects/sculpt-practice/render-test/moonray_alignment_case_G.txt
+/Users/j7s/houdini-projects/sculpt-practice/render-test/moonray_alignment_case_H.txt
+```
+
+Product camera findings:
+
+- Case 1 authored `RenderSettings.camera = /cameras/camera1` and left
+  `RenderProduct.camera` absent. A production `husk -R
+  HdMoonrayRendererPlugin --settings /Render/rendersettings` render produced
+  the red camera1 view.
+- Case 2 authored both `RenderSettings.camera` and `RenderProduct.camera` to
+  `/cameras/camera1`. The render matched Case 1.
+- Case 3 authored `RenderSettings.camera = /cameras/camera1` and
+  `RenderProduct.camera = /cameras/camera2`. The render switched to the green
+  camera2 view.
+
+Verdict: `RenderProduct.camera` is a real product-level override in the
+Houdini/husk path. When absent, husk falls back to `RenderSettings.camera` for
+the default product. The custom MoonRay LOP does not need to author
+`RenderProduct.camera` for the single default Beauty product. Authoring it by
+default would be redundant and could fight future USD Render ROP camera
+override workflows. If product-specific cameras are exposed later, they should
+be explicit product controls, not an unconditional mirror.
+
+Aspect/framing findings:
+
+- A square `128x128` product with `RenderProduct.camera` absent and explicit
+  `expandAperture` matched the same square render with Product.camera authored
+  to camera1.
+- A square product with explicit `cropAperture` rendered with the same OIIO
+  stats as the square `expandAperture` case in the marker probe.
+- A square product with explicit full-frame `dataWindowNDC = (0, 0, 1, 1)`
+  also matched the square `expandAperture` case.
+- A wide `128x72` control rendered different channel statistics from the
+  square cases, proving the test was sensitive to output aspect, but not to
+  explicit crop-vs-expand policy in this hdMoonray/husk path.
+
+Verdict: the remaining 1:1 framing mismatch is not proven to be caused by
+missing `RenderProduct.camera`, missing explicit full-frame `dataWindowNDC`, or
+missing explicit `expandAperture` authoring. The stronger suspicion is that the
+effective aspect/conform policy is resolved upstream into Hydra camera/framing
+state, or is not being propagated/consumed by hdMoonray as expected. Do not
+patch the DCC LOP to author Product.camera, dataWindowNDC, or aspect policy as
+a blind workaround.
+
+Current policy decision before editing:
+
+| Attribute | Author in MoonRay LOP? | Location | Reason |
+|-----------|------------------------|----------|--------|
+| `RenderSettings.camera` | yes | Settings | Single default camera authority. |
+| `RenderProduct.camera` | no by default | Product | Proven optional override; absent falls back to Settings camera in husk. |
+| `RenderSettings.resolution` | yes | Settings | Offline output authority. |
+| `RenderProduct.resolution` | yes | Product | Product override must match Settings to avoid stale/native conflicts. |
+| `RenderSettings.pixelAspectRatio` | yes | Settings | Hidden Houdini preset companion value. |
+| `RenderProduct.pixelAspectRatio` | yes | Product | Product override must match Settings. |
+| `RenderSettings.dataWindowNDC` | no | Settings | Full-frame fallback is correct; explicit authoring did not fix square framing. |
+| `RenderProduct.dataWindowNDC` | no | Product | Full-frame fallback is correct; explicit authoring did not fix square framing. |
+| `RenderSettings.aspectRatioConformPolicy` | no for now | Settings | Fallback is `expandAperture`; explicit crop/expand did not change hdMoonray output in probe. |
+| `RenderProduct.aspectRatioConformPolicy` | no for now | Product | Same as Settings; do not author until Hydra/hdMoonray propagation is proven. |
+| `productName` | yes | Product | Required disk-output fallback and ROP outputimage source. |
+| `productType` | yes | Product | Required raster product contract. |
+| `orderedVars` | yes | Product | Required Beauty/AOV output contract. |
+
+The next patch, if any, should be chosen only after comparing a live Houdini IPR
+temp USD/render-pass state against the exported USD Render ROP stage. If the
+USD is internally consistent but square framing still differs, investigate
+hdMoonray camera/window-policy/framing translation before changing DCC
+authoring.
 
 ## SceneVariables and Render Settings
 
@@ -603,7 +764,7 @@ Inventory counts:
 
 - `SceneVariables.json`: 112 attributes.
 - `RenderOutput.json`: 37 attributes.
-- Current custom MoonRay Render Settings LOP: 50 curated SceneVariable parameters plus default RenderSettings, RenderProduct, productName, productType, and Beauty RenderVar authoring for H20.5 disk output. The `aov_beauty` internal parameter is preserved; disabling it is diagnostic only.
+- Current custom MoonRay Render Settings LOP: 52 curated SceneVariable parameters plus default RenderSettings, RenderProduct, productName, productType, and Beauty RenderVar authoring for H20.5 disk output. The `aov_beauty` internal parameter is preserved; disabling it is diagnostic only.
 
 Method:
 
@@ -648,7 +809,7 @@ This table is a summarized inventory of the parameters relevant to the MoonRay R
 | SceneVariables.json | `sample_clamping_depth` | Sample Clamping Depth | Int | `1` | positive int | Clamp after depth. | SceneVariables | RenderSettings prim | exposed | expose main UI | Clamping / Fireflies | Existing curated control. |
 | SceneVariables.json | `roughness_clamping_factor` | Roughness Clamping Factor | Float | `0.0` | `0..10` artist range | Indirect roughness clamp/firefly reduction. | SceneVariables | RenderSettings prim | exposed/RDLA-proven | expose main UI | Clamping / Fireflies | Mirrored from generic MoonRay tab. |
 | SceneVariables.json | `volume_*` curated group | Volume settings | Float/Int/enum | metadata defaults | metadata enums | Global volume quality/overlap/indirect settings. | SceneVariables | RenderSettings prim | exposed | expose main UI | Volumes | Artist-useful volume group only; deep output separate. |
-| SceneVariables.json | `texture_blur`, `pixel_filter_width`, `pixel_filter` | Filtering / Textures | Float/enum | metadata defaults | metadata enum | Texture/pixel filtering. | SceneVariables | RenderSettings prim | exposed | expose main UI | Filtering / Textures | Existing curated controls. |
+| SceneVariables.json | `texture_blur`, `texture_cache_size`, `texture_file_handles`, `pixel_filter_width`, `pixel_filter` | Filtering / Textures | Float/int/enum | metadata defaults | metadata enum | Texture cache, file handles, and pixel/texture filtering. | SceneVariables | RenderSettings prim | exposed | expose main UI | Filtering / Textures | Texture cache default is 4000 MB; file handles default is 24000. |
 | SceneVariables.json | `enable_dof` | Enable DOF | Bool | `true` | toggle | Global DOF enable. | SceneVariables | RenderSettings prim | exposed/RDLA-proven | expose main UI | Global Toggles | Camera focus/aperture remain camera prim settings. |
 | SceneVariables.json | `enable_displacement`, `enable_subsurface_scattering`, `enable_shadowing`, `enable_presence_shadows`, `lights_visible_in_camera`, `propagate_visibility_bounce_type`, `shadow_terminator_fix` | Global toggles | Bool/enum | metadata defaults | metadata enum | Global production toggles. | SceneVariables | RenderSettings prim | exposed | expose main UI | Global Toggles | Keep curated; do not include all debug/internal toggles. |
 | SceneVariables.json | `image_width`, `image_height` | Image dimensions | Int | `1920`, `1080` | n/a | Image dimensions. | SceneVariables | do not author here | not exposed | do not include in this LOP | n/a | Excluded by `RenderSettings.cc`; use USD RenderSettings resolution. |
@@ -675,7 +836,8 @@ Current exposed/custom-authored settings after discovery:
 | Output / Product | Output Picture | `product_name` | `RenderProduct.productName` | token | `$HIP/render/$HIPNAME.$OS.\$F4.exr` | USD RenderProduct / H20.5 Karma pattern | Escaped frame token prevents unintended LOP time dependency while preserving frame expansion for ROP/husk. |
 | Camera / Resolution | Camera | `camera` | `RenderSettings.camera` relationship | rel | `/cameras/camera1` | H20.5 Karma pattern | validated previously |
 | Camera / Resolution | Resolution Mode | `resolution_mode_note` | UI note only | n/a | Manual Resolution | H20.5 lifecycle cleanup decision | computed modes intentionally removed |
-| Camera / Resolution | Resolution | `resolution` | `RenderSettings.resolution` | `int2` | `1920, 1080` | USD RenderSettings | validated previously |
+| Camera / Resolution | Resolution | `resolution` | `RenderSettings.resolution` and `RenderProduct.resolution` | `int2` | `1920, 1080` | USD RenderSettings / RenderProduct | validated; product resolution must match settings resolution |
+| Camera / Resolution | Pixel Aspect Ratio | `pixelAspectRatio` | `RenderSettings.pixelAspectRatio` and `RenderProduct.pixelAspectRatio` | float | `1.0` | USD RenderSettingsBase / Houdini resolution preset callback | hidden companion parm; authored consistently |
 | Output / Product | Beauty RenderVar / Disk Output Path | `aov_beauty` | `RenderProduct.orderedVars` + Beauty RenderVar | RenderVar | enabled | H20.5 `husk`/EXR evidence | Default disk-output path validated; disabled state is diagnostic only |
 | Sampling | Sampling Mode | `sceneVariable_sampling_mode` | `moonray:sceneVariable:sampling_mode` | token-authored enum | `uniform` | SceneVariables metadata | RDLA token path proven for enum style |
 | Sampling | Light Sampling Mode | `sceneVariable_light_sampling_mode` | `moonray:sceneVariable:light_sampling_mode` | token-authored enum | `uniform` | SceneVariables metadata | RDLA-proven |
@@ -687,7 +849,7 @@ Current exposed/custom-authored settings after discovery:
 | Ray Depth / Path | Ray depth/path controls | `sceneVariable_max_*`, thresholds | `moonray:sceneVariable:*` | int/float | metadata defaults | SceneVariables metadata | validated previously for representative attrs |
 | Clamping / Fireflies | Sample/Roughness clamps | `sceneVariable_sample_clamping_*`, `sceneVariable_roughness_clamping_factor` | `moonray:sceneVariable:*` | int/float | metadata defaults | SceneVariables metadata / generic MoonRay tab | roughness RDLA-proven |
 | Volumes | Volume group | `sceneVariable_volume_*` | `moonray:sceneVariable:*` | int/float/token | metadata defaults | SceneVariables metadata / Global.ds | authored; representative validation needed |
-| Filtering / Textures | Texture blur / pixel filter controls | `sceneVariable_texture_blur`, etc. | `moonray:sceneVariable:*` | float/token | metadata defaults | SceneVariables metadata / Global.ds | authored; representative validation needed |
+| Filtering / Textures | Texture cache, file handles, texture blur, and pixel filter controls | `sceneVariable_texture_cache_size`, `sceneVariable_texture_file_handles`, etc. | `moonray:sceneVariable:*` | int/float/token | metadata defaults | SceneVariables metadata / Global.ds | authored; representative validation needed |
 | Global Toggles | Production toggles | `sceneVariable_enable_*`, etc. | `moonray:sceneVariable:*` | bool/token | metadata defaults | SceneVariables metadata / Global.ds | `enable_dof` RDLA-proven |
 | Advanced / Debug | Disable Optimized Hair Sampling | `sceneVariable_disable_optimized_hair_sampling` | `moonray:sceneVariable:disable_optimized_hair_sampling` | bool | false | SceneVariables metadata | newly added; needs RDLA validation |
 | Advanced / Debug | Debug RDL/RDLA Output | `rdlOutput` | `rdlOutput` | string | blank | hdMoonRay delegate setting | validated previously |
@@ -725,7 +887,7 @@ Current exposed/custom-authored settings after discovery:
 | Ray Depth / Path | Path limits and thresholds | max depth family, subsurface per path, russian roulette, transparency/presence threshold/quality | geometry resolution limits | SceneVariables only. |
 | Lighting | Global lighting behavior if it remains useful as a separate tab | currently no separate tab; light sampling lives in Sampling and lights visibility in Global Toggles | per-light attrs | Keep per-light UI elsewhere. |
 | Volumes | Global volume controls | volume quality/shadow/illumination/opacity/overlap/factors/indirect samples | deep output settings | Uses useful volume group from metadata/DS. |
-| Filtering / Textures | Texture/pixel filtering | texture blur, pixel filter width/type | texture cache/file handles for now | Cache controls deferred. |
+| Filtering / Textures | Texture/pixel filtering | texture cache size, texture file handles, texture blur, pixel filter width/type | texture conversion/OCIO behavior | Cache controls exposed from `SceneVariables.json`; texture color management remains separate. |
 | Clamping / Fireflies | Firefly reduction | sample clamp value/depth, roughness clamping factor | none currently | Roughness clamp mirrored from generic MoonRay tab. |
 | AOVs | Artist AOV checkboxes | alpha, depth, Z, N, Ng, P, Wp, St, weight | material/LPE/light/visibility/primitive-attribute/Cryptomatte/motion-vector families | Native set only; all toggles default off. |
 | Advanced / Debug | Troubleshooting/low-level controls | disable optimized hair sampling, debug RDL/RDLA output | Arras/internal/debug dumps and default Beauty disk-output controls | Keep sparse. |
@@ -988,3 +1150,159 @@ Future passes should validate:
 - [ ] Verify USD Render ROP `renderer`, `loppath`, `rendersettings`, and `outputimage` wiring.
 - [ ] Verify RenderProduct `$F4` output path behavior.
 - [ ] Treat black/zero-filled renders as output-wiring evidence only, not filled-pixel Beauty/AOV proof.
+
+## Step 3 Render Contract Policy
+
+The MoonRay Render Settings LOP is the DCC author of USD render intent, not the
+execution engine. It should author a coherent default render contract:
+
+- `/Render/rendersettings`
+- `/Render/Products/renderproduct`
+- `/Render/Products/Vars/*`
+
+`RenderSettings` is the default authority for camera, products, resolution, pixel
+aspect ratio, and MoonRay scene-variable attributes. `RenderProduct` is the
+default authority for product name, product type, ordered vars, product
+resolution, and product pixel aspect ratio. Product resolution and pixel aspect
+must match RenderSettings unless an explicit future product-override UI is added.
+
+`RenderProduct.camera` remains absent for the default beauty product. Local tests
+proved that husk falls back to `RenderSettings.camera` when Product.camera is
+absent, and that authored Product.camera is a real product-specific override.
+The default MoonRay product should not claim that override until the UI exposes a
+product-specific camera.
+
+`dataWindowNDC` and `aspectRatioConformPolicy` are currently left to USD schema
+fallback. Explicit full-frame `dataWindowNDC` and explicit expand/crop aperture
+policies produced identical MoonRay/husk square-output stats in the marker probe,
+so blindly authoring them would add opinions without proving a behavioral fix.
+
+The Houdini USD Render ROP owns execution: selected LOP branch, selected
+RenderSettings path, renderer, frame/range execution, and `outputimage` override.
+The owned MoonRay ROP should point to the owning Render Settings LOP branch and
+its `render_settings_prim`. `outputimage` should reference the owner's
+`product_name` so Houdini expands `$HIP`, `$HIPNAME`, `$OS`, and `$F4` in the ROP
+context. `RenderProduct.productName` remains the valid USD fallback.
+
+Duplicate MoonRay Render Settings LOPs that author the same
+`/Render/rendersettings` or `/Render/Products/renderproduct` paths are scene
+poison. They can make a render use stale resolution/product/camera opinions even
+when each individual node is valid. The DCC layer should warn when active sibling
+MoonRay Render Settings LOPs target the same settings or product paths.
+
+Houdini 20.5 HOM does not expose a mutable `hou.Node.addWarning()` API for this
+HDA. The implemented warning path is therefore non-cook-time and non-destructive:
+create/repair records the duplicate contract in node userData and appends a
+visible warning to each owned USD Render ROP comment. This avoids raising
+`hou.NodeWarning` during the cook, which would risk interrupting USD authoring.
+
+### Step 3 Runtime Evidence
+
+| Path | Evidence | Verdict |
+|------|----------|---------|
+| husk clean scene with `--settings /Render/rendersettings` | No unsupported RenderSettings/Product/Var warnings; EXR was 512x512 RGBA float and nonconstant. | Clean production path. |
+| `hd_usd2rdl` clean scene | RDLA written, but legacy traversal logged unsupported RenderProduct. | Command-tool legacy traversal warning, not fake Bprim support target. |
+| `hd_render` clean scene | EXR written, but legacy traversal logged unsupported RenderProduct. | Command-tool legacy traversal warning, not fake Bprim support target. |
+| real-scene husk probe | No RenderSettings/Product warning before the manual timeout; render reached mcrt render prep. | Render contract warnings not observed in husk path. |
+| real-scene `hd_usd2rdl` | RDLA written, unsupported RenderProduct warning plus unrelated light compatibility warnings. | Needs command-tool traversal cleanup; light warnings remain separate. |
+
+### Rejected Step 3 Fixes
+
+- Do not add fake/no-op RenderProduct or RenderVar Bprim support.
+- Do not set `aovsupport=false` to hide UI paths.
+- Do not author default Product.camera as a speculative framing fix.
+- Do not hardcode camera, resolution, or project-specific paths.
+- Do not collapse `RenderProduct.productName` and ROP `outputimage`; they are
+  related but have different authority.
+
+## 2026-06-20 Shipping Pass DCC Update
+
+This section records the DCC-facing state after the final Step 3 shipping pass.
+The runtime/command-tool details are recorded in the hdMoonray render-contract
+docs; this section focuses on what the MoonRay Render Settings LOP and owned USD
+Render ROP author or preserve.
+
+### Authored USD Contract
+
+The MoonRay Render Settings LOP authors a coherent default USD render contract:
+
+- `UsdRenderSettings` at the configured `render_settings_prim`.
+- one default `UsdRenderProduct` under the configured products parent/name.
+- RenderVars for Beauty, native AOVs, and the currently supported
+  material/denoise AOVs.
+- `moonray:sceneVariable:*` attributes on RenderSettings.
+
+Current parameter authority:
+
+| USD value | DCC authority |
+|-----------|---------------|
+| `RenderSettings.camera` | camera path control / Solaris camera relationship |
+| `RenderSettings.products` | generated default product relationship |
+| `RenderSettings.resolution` | `resolutionx`, `resolutiony` |
+| `RenderSettings.pixelAspectRatio` | DCC pixel-aspect value |
+| `RenderProduct.productName` | `product_name` |
+| `RenderProduct.productType` | default raster product |
+| `RenderProduct.orderedVars` | enabled Beauty/AOV RenderVars |
+| `RenderProduct.resolution` | same `resolutionx`, `resolutiony` tuple as RenderSettings |
+| `RenderProduct.pixelAspectRatio` | same pixel-aspect value as RenderSettings |
+| `RenderProduct.camera` | intentionally absent by default |
+| `dataWindowNDC` | USD schema fallback |
+| `aspectRatioConformPolicy` | USD schema fallback |
+
+The default Product.camera remains absent because local tests proved that husk
+falls back to RenderSettings.camera, and an authored Product.camera is a real
+product-specific override. A future product-camera UI should be explicit rather
+than silently authored for the default beauty product.
+
+### Owned USD Render ROP Contract
+
+The owned MoonRay USD Render ROP remains the Houdini execution authority:
+
+- `loppath = opinput(".", 0)` so the ROP renders the owner branch.
+- `rendersettings = chs("<owner>/render_settings_prim")`.
+- `outputimage = chs("<owner>/product_name")` through the raw/backtick-safe
+  expression model validated earlier.
+- renderer is `HdMoonrayRendererPlugin`.
+
+`RenderProduct.productName` remains the USD fallback product path, while ROP
+`outputimage` is the Houdini execution override that expands `$HIP`, `$HIPNAME`,
+`$OS`, and `$F4` in the correct node context.
+
+### AOV And Beauty Invariants
+
+- Beauty remains RGBA/color4f for the explicit disk-output RenderVar.
+- `aovsupport` remains enabled in source and installed `UsdRenderers.json`.
+- `cameraDepth` remains absent from the product-facing DCC AOV contract.
+- Native AOVs remain: `alpha`, `depth`, `Z`, `N`, `Ng`, `P`, `Wp`, `St`,
+  `weight`.
+- Material/denoise AOVs remain opt-in and default off.
+- Cryptomatte, LPEs, visibility AOVs, primvars, and motion vectors remain
+  deferred.
+
+### Provenance And Validation
+
+Installed/source DCC SHA-256 checks matched:
+
+| File | SHA-256 |
+|------|---------|
+| `moonray_render_settings.py` | `79e6564036fe759adcf34e830570d66aa6120834b2c1c25c3f79fa7d1b154a92` |
+| `Lop::DW_MOONRAY::moonrayrendersettings::1.hda` | `42e5403d53040afdafe8dd2af5fcd0c35f55e4d667c51caa778cbbaa5180311b` |
+| `UsdRenderers.json` | `fce8438e8c006cf3e80ca655e8ea299dc634651b1c37629c7eb4cf8aaa06e312` |
+
+Installed H20.5 DCC validation passed:
+
+```text
+SUMMARY PASS=121 FAIL=0 SKIP=6
+```
+
+`husk --list-renderers` listed both the normal and debug MoonRay delegates.
+`git diff --check` passed in parent, DCC, hdMoonray, and SDR after the shipping
+pass.
+
+### Remaining DCC Boundaries
+
+- Fresh graphical Houdini/Solaris IPR validation is still needed for final
+  viewport visual matching.
+- The DCC layer does not own H20.5 husk's extra memory metadata emission.
+- The DCC layer does not own GUI-only Qt/OpenGL warning noise unless a later
+  fresh Houdini session proves a MoonRay-specific trigger.

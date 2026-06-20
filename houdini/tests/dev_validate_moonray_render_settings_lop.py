@@ -22,7 +22,7 @@ RENDERER_TOKEN = "HdMoonrayRendererPlugin"
 OWNER_LOP_KEY = "moonray_render_settings_lop"
 OWNER_OPERATOR_KEY = "moonray_render_settings_operator"
 OWNER_SESSION_KEY = "moonray_render_settings_lop_session_id"
-EXPECTED_SCENE_VARIABLE_COUNT = 50
+EXPECTED_SCENE_VARIABLE_COUNT = 52
 EXPECTED_MODULE_SUFFIX = "/plugin/houdini/python3.11libs/moonray_render_settings.py"
 
 
@@ -283,6 +283,21 @@ def test_lifecycle_scenarios() -> None:
         and owned_rop_for_node(node1)[0] is not owned_rop_for_node(node2)[0],
         {"node1": [rop_info(rop) for rop in owned_rop_for_node(node1)], "node2": [rop_info(rop) for rop in owned_rop_for_node(node2)]},
     )
+    duplicate_warning_key = "moonray_render_contract_warning"
+    duplicate_warning_ok = (
+        bool(node1.userData(duplicate_warning_key))
+        and bool(node2.userData(duplicate_warning_key))
+        and all("duplicate MoonRay Render Settings contract" in rop.comment() for rop in distinct)
+    )
+    check(
+        "duplicate_render_contract_paths_warn",
+        duplicate_warning_ok,
+        {
+            "node1_warning": node1.userData(duplicate_warning_key),
+            "node2_warning": node2.userData(duplicate_warning_key),
+            "rop_comments": [rop.comment() for rop in distinct],
+        },
+    )
 
     node1.setName("moonraysettings_renamed")
     press_repair(node1)
@@ -430,6 +445,11 @@ def test_resolution_and_usd_contract() -> None:
         "image_width" not in scene_variable_names and "image_height" not in scene_variable_names,
         sorted(name for name in scene_variable_names if name in ("image_width", "image_height")),
     )
+    check(
+        "scene_variables_include_texture_cache_controls",
+        {"texture_cache_size", "texture_file_handles"}.issubset(scene_variable_names),
+        sorted(name for name in scene_variable_names if name in ("texture_cache_size", "texture_file_handles")),
+    )
     expected_aov_toggles = sorted(
         ["aov_beauty"]
         + [aov["parm"] for aov in moonray_render_settings.AOV_DEFINITIONS]
@@ -484,10 +504,48 @@ def test_resolution_and_usd_contract() -> None:
     node.parm("camera").set("/cameras/camera1")
     node.parm("resolutionx").set(512)
     node.parm("resolutiony").set(256)
+    node.parm("pixelAspectRatio").set(1.25)
     value = tuple(node.parmTuple("resolution").eval())
     check("manual_resolution", value == (512, 256), value)
 
     node.cook(force=True)
+    stage_obj = node.stage()
+    settings = UsdRender.Settings(stage_obj.GetPrimAtPath("/Render/rendersettings"))
+    product = UsdRender.Product(stage_obj.GetPrimAtPath("/Render/Products/renderproduct"))
+    settings_resolution = settings.GetResolutionAttr().Get()
+    product_resolution = product.GetResolutionAttr().Get()
+    settings_pixel_aspect = settings.GetPixelAspectRatioAttr().Get()
+    product_pixel_aspect = product.GetPixelAspectRatioAttr().Get()
+    product_camera_targets = product.GetPrim().GetRelationship("camera").GetTargets()
+    check(
+        "usd_default_contract_settings_product_resolution_match",
+        tuple(settings_resolution) == (512, 256) and tuple(product_resolution) == (512, 256),
+        {"settings": settings_resolution, "product": product_resolution},
+    )
+    check(
+        "usd_default_contract_settings_product_pixel_aspect_match",
+        settings_pixel_aspect == 1.25 and product_pixel_aspect == 1.25,
+        {"settings": settings_pixel_aspect, "product": product_pixel_aspect},
+    )
+    check("usd_default_contract_product_camera_not_authored", not product_camera_targets, product_camera_targets)
+    check(
+        "usd_default_contract_data_window_not_authored",
+        not settings.GetDataWindowNDCAttr().HasAuthoredValueOpinion()
+        and not product.GetDataWindowNDCAttr().HasAuthoredValueOpinion(),
+        {
+            "settings": settings.GetDataWindowNDCAttr().HasAuthoredValueOpinion(),
+            "product": product.GetDataWindowNDCAttr().HasAuthoredValueOpinion(),
+        },
+    )
+    check(
+        "usd_default_contract_aspect_policy_not_authored",
+        not settings.GetAspectRatioConformPolicyAttr().HasAuthoredValueOpinion()
+        and not product.GetAspectRatioConformPolicyAttr().HasAuthoredValueOpinion(),
+        {
+            "settings": settings.GetAspectRatioConformPolicyAttr().HasAuthoredValueOpinion(),
+            "product": product.GetAspectRatioConformPolicyAttr().HasAuthoredValueOpinion(),
+        },
+    )
     usd_path = os.path.join(tempfile.gettempdir(), "moonray_render_settings_lifecycle_validation.usda")
     node.stage().Flatten().Export(usd_path)
     text = open(usd_path, "r", encoding="utf-8").read()
@@ -714,7 +772,7 @@ def test_rdla_receipt() -> None:
         skip("rdla_scenevariable_receipt", f"husk/RDLA unavailable rc={result.returncode}; see {log_path}")
         return
     text = open(rdla_path, "r", encoding="utf-8", errors="replace").read()
-    ok = all(key in text for key in ("target_adaptive_error", "roughness_clamping_factor", "light_sampling_quality"))
+    ok = all(key in text for key in ("target_adaptive_error", "roughness_clamping_factor", "light_sampling_quality", "texture_cache_size", "texture_file_handles"))
     check("rdla_scenevariable_receipt", ok, rdla_path)
 
 
