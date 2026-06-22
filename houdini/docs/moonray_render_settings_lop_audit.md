@@ -1198,13 +1198,23 @@ visible warning to each owned USD Render ROP comment. This avoids raising
 
 ### Step 3 Runtime Evidence
 
+The table below records the original Step 3 audit observation. It is now
+historical for the legacy command tools: the pushed H20.5 render-contract stack
+filters raw `RenderProduct` and `RenderVar` traversal in `hd_render` and
+`hd_usd2rdl` instead of adding fake Product/Var Bprim support. The current
+contract remains:
+
+- `RenderSettings` is the supported Hydra Bprim path.
+- `RenderProduct` and `RenderVar` are not fake/no-op hdMoonray Bprims.
+- legacy command-tool raw Product/Var traversal is filtered.
+
 | Path | Evidence | Verdict |
 |------|----------|---------|
 | husk clean scene with `--settings /Render/rendersettings` | No unsupported RenderSettings/Product/Var warnings; EXR was 512x512 RGBA float and nonconstant. | Clean production path. |
-| `hd_usd2rdl` clean scene | RDLA written, but legacy traversal logged unsupported RenderProduct. | Command-tool legacy traversal warning, not fake Bprim support target. |
-| `hd_render` clean scene | EXR written, but legacy traversal logged unsupported RenderProduct. | Command-tool legacy traversal warning, not fake Bprim support target. |
+| `hd_usd2rdl` clean scene | Historical: RDLA written, but legacy traversal logged unsupported RenderProduct before the command-tool filtering patch. | Superseded by pushed command-tool traversal filtering. |
+| `hd_render` clean scene | Historical: EXR written, but legacy traversal logged unsupported RenderProduct before the command-tool filtering patch. | Superseded by pushed command-tool traversal filtering. |
 | real-scene husk probe | No RenderSettings/Product warning before the manual timeout; render reached mcrt render prep. | Render contract warnings not observed in husk path. |
-| real-scene `hd_usd2rdl` | RDLA written, unsupported RenderProduct warning plus unrelated light compatibility warnings. | Needs command-tool traversal cleanup; light warnings remain separate. |
+| real-scene `hd_usd2rdl` | Historical: RDLA written, unsupported RenderProduct warning plus unrelated light compatibility warnings before the command-tool filtering patch. | Product/Var traversal warning superseded; light warnings remain separate. |
 
 ### Rejected Step 3 Fixes
 
@@ -1307,23 +1317,29 @@ pass.
 - The DCC layer does not own GUI-only Qt/OpenGL warning noise unless a later
   fresh Houdini session proves a MoonRay-specific trigger.
 
-## 2026-06 ARRI OCIO Controls
+## 2026-06 Config-Driven OCIO Controls
 
 The MoonRay Render Settings LOP now exposes a minimal Color Management folder.
 The folder does not bake display/view transforms and does not change AOV,
 RenderProduct, scene-scale, or displacement behavior.
 
+The OCIO implementation is config-driven. ARRI configs were validation inputs,
+not hidden renderer policy. Render-space resolution is owned by hdMoonray and
+uses the active OCIO config roles/aliases; texture `auto` uses OCIO file rules
+only.
+
 Current DCC color controls:
 
 | Control | Authored USD / behavior | Notes |
 | --- | --- | --- |
-| `renderingColorSpace` | Authors `UsdRender.Settings.renderingColorSpace` only when non-empty and not `auto`. | Blank/`auto` clears stale authored values and lets hdMoonray resolve the active OCIO config roles. With the ARRI CG config, default role resolution is `Linear ARRI Wide Gamut 4`. |
+| `renderingColorSpace` | Authors `UsdRender.Settings.renderingColorSpace` only when non-empty and not `auto`. | Blank/`auto` clears stale authored values and lets hdMoonray resolve the active OCIO config roles. ARRI CG validation resolved to `Linear ARRI Wide Gamut 4`; other configs resolve through their own roles/aliases. |
 | OCIO policy note | UI help only. | The render process uses `$OCIO`; standalone tools should be launched through the Houdini package environment or `setupHoudini.sh`. |
 | Texture source policy note | UI help only. | Native `ImageMap.source_color_space` and `UsdUVTexture.sourceColorSpace` / `source_color_space` own texture source interpretation. |
 | Display transform note | UI help only. | EXR output remains scene-linear/render-space; no display/view transform is baked by this pass. |
 
 The native Houdini `moonray_ImageMap.ds` and `moonray_nodes.json` now expose
-`source_color_space` with practical ARRI/H20.5 menu entries:
+`source_color_space` with config-driven menu entries. Common validation examples
+seen in tested H20.5 configs included:
 
 - `auto`;
 - `raw`;
