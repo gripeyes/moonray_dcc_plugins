@@ -476,6 +476,19 @@ def test_resolution_and_usd_contract() -> None:
     folders = folder_template_names_and_labels(node.parmTemplateGroup())
     check("native_aov_folder_present", any(label == "AOVs" for _, label in folders), folders)
     check("material_denoise_aov_folder_present", any(label == "Material / Denoise AOVs" for _, label in folders), folders)
+    check("color_management_folder_present", any(label == "Color Management" for _, label in folders), folders)
+    rendering_color_space = node.parm("renderingColorSpace")
+    check(
+        "rendering_color_space_control_exists",
+        rendering_color_space is not None and rendering_color_space.eval() == "",
+        rendering_color_space.eval() if rendering_color_space is not None else None,
+    )
+    rendering_color_space_template = rendering_color_space.parmTemplate() if rendering_color_space is not None else None
+    check(
+        "rendering_color_space_has_menu",
+        rendering_color_space_template is not None and "ocio_render_space_menu" in rendering_color_space_template.itemGeneratorScript(),
+        rendering_color_space_template.itemGeneratorScript() if rendering_color_space_template is not None else None,
+    )
     check(
         "deferred_aov_families_not_exposed",
         not any(name in aov_toggles for name in ("aov_camera_" + "depth", "aov_lpe", "aov_cryptomatte", "aov_visibility", "aov_motionvec")),
@@ -529,6 +542,11 @@ def test_resolution_and_usd_contract() -> None:
     )
     check("usd_default_contract_product_camera_not_authored", not product_camera_targets, product_camera_targets)
     check(
+        "usd_default_contract_rendering_color_space_not_authored",
+        not settings.GetRenderingColorSpaceAttr().HasAuthoredValueOpinion(),
+        settings.GetRenderingColorSpaceAttr().Get(),
+    )
+    check(
         "usd_default_contract_data_window_not_authored",
         not settings.GetDataWindowNDCAttr().HasAuthoredValueOpinion()
         and not product.GetDataWindowNDCAttr().HasAuthoredValueOpinion(),
@@ -567,6 +585,24 @@ def test_resolution_and_usd_contract() -> None:
         for aov in moonray_render_settings.AOV_DEFINITIONS
     }
     check("usd_default_contract_non_beauty_aovs_absent", all(default_non_beauty_absent.values()), default_non_beauty_absent)
+
+    node.parm("renderingColorSpace").set("scene_linear")
+    node.cook(force=True)
+    settings = UsdRender.Settings(node.stage().GetPrimAtPath("/Render/rendersettings"))
+    check(
+        "usd_rendering_color_space_authored_when_explicit",
+        settings.GetRenderingColorSpaceAttr().Get() == "scene_linear",
+        settings.GetRenderingColorSpaceAttr().Get(),
+    )
+    node.parm("renderingColorSpace").set("auto")
+    node.cook(force=True)
+    settings = UsdRender.Settings(node.stage().GetPrimAtPath("/Render/rendersettings"))
+    check(
+        "usd_rendering_color_space_auto_not_authored",
+        not settings.GetRenderingColorSpaceAttr().HasAuthoredValueOpinion(),
+        settings.GetRenderingColorSpaceAttr().Get(),
+    )
+    node.parm("renderingColorSpace").set("")
 
     node.parm("sceneVariable_sampling_mode").set(1)
     node.parm("sceneVariable_min_adaptive_samples").set(3)

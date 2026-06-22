@@ -1,5 +1,6 @@
 """MoonRay Solaris Render Settings authoring and HDA generation."""
 
+import os
 from pathlib import Path
 
 import hou
@@ -16,12 +17,25 @@ RENDER_PRODUCT_NAME = "renderproduct"
 BEAUTY_RENDER_VAR_NAME = "beauty"
 PRODUCT_NAME = "$HIP/render/$HIPNAME.$OS.\\$F4.exr"
 DEFAULT_RESOLUTION = (1920, 1080)
+DEFAULT_RENDERING_COLOR_SPACE = ""
 ROP_NODE_TYPE = "usdrender_rop"
 ROP_RENDERER_TOKEN = "HdMoonrayRendererPlugin"
 ROP_OWNER_LOP_KEY = "moonray_render_settings_lop"
 ROP_OWNER_OPERATOR_KEY = "moonray_render_settings_operator"
 ROP_OWNER_SESSION_KEY = "moonray_render_settings_lop_session_id"
 CONTRACT_WARNING_KEY = "moonray_render_contract_warning"
+OCIO_RENDER_ROLE_ORDER = (
+    "rendering",
+    "scene_linear",
+    "default_float",
+    "reference",
+    "default",
+)
+OCIO_TEXTURE_ROLE_ORDER = (
+    "texture_paint",
+    "color_picking",
+    "default_byte",
+)
 
 
 AOV_DEFINITIONS = (
@@ -329,6 +343,12 @@ def author_from_node(node=None):
     if camera_path:
         _set_rel_targets(settings, settings.CreateCameraRel, [camera_path])
 
+    rendering_color_space = _string_parm(node, "renderingColorSpace", DEFAULT_RENDERING_COLOR_SPACE).strip()
+    if rendering_color_space and rendering_color_space.lower() != "auto":
+        settings.CreateRenderingColorSpaceAttr().Set(rendering_color_space)
+    else:
+        settings.GetRenderingColorSpaceAttr().Clear()
+
     width = int(_parm(node, "resolutionx", DEFAULT_RESOLUTION[0]))
     height = int(_parm(node, "resolutiony", DEFAULT_RESOLUTION[1]))
     resolution = Gf.Vec2i(width, height)
@@ -629,6 +649,162 @@ def _label(name, label, text):
     return hou.LabelParmTemplate(name, label, (text,))
 
 
+def _regular_string(name, label, default, help_text):
+    return hou.StringParmTemplate(
+        name,
+        label,
+        1,
+        (default,),
+        string_type=hou.stringParmType.Regular,
+        help=help_text,
+    )
+
+def _ocio_config():
+    try:
+        import PyOpenColorIO as ocio
+        return ocio, ocio.GetCurrentConfig()
+    except Exception:
+        return None, None
+
+
+def _ocio_color_space_name(color_space):
+    try:
+        return color_space.getName()
+    except Exception:
+        return ""
+
+
+def _ocio_color_spaces(config):
+    if config is None:
+        return []
+    try:
+        return list(config.getColorSpaces())
+    except Exception:
+        pass
+    try:
+        return [config.getColorSpace(name) for name in config.getColorSpaceNames()]
+    except Exception:
+        return []
+
+
+def _ocio_categories(color_space):
+    categories = []
+    try:
+        for index in range(color_space.getNumCategories()):
+            categories.append(color_space.getCategory(index))
+    except Exception:
+        pass
+    return categories
+
+
+def _ocio_family(color_space):
+    try:
+        return color_space.getFamily() or ""
+    except Exception:
+        return ""
+
+
+def _ocio_role_color_space(config, role):
+    if config is None:
+        return ""
+    try:
+        color_space = config.getColorSpace(role)
+        return _ocio_color_space_name(color_space)
+    except Exception:
+        return ""
+
+
+def _append_unique(items, token, label=None):
+    if token in [item[0] for item in items]:
+        return
+    items.append((token, label or token))
+
+
+def _ocio_menu_items(kind):
+    _, config = _ocio_config()
+    items = []
+    if kind == "render":
+        _append_unique(items, "", "Auto (OCIO roles)")
+        for role in OCIO_RENDER_ROLE_ORDER:
+            if role == "default" and len(items) > 1:
+                continue
+            name = _ocio_role_color_space(config, role)
+            if name:
+                suffix = "role: %s" % role
+                if role == "default":
+                    suffix += ", last fallback"
+                _append_unique(items, name, "%s (%s)" % (name, suffix))
+        keywords = ("render", "scene", "working", "linear")
+    else:
+        _append_unique(items, "auto", "Auto (OCIO file rules)")
+        _append_unique(items, "raw", "Raw")
+        _append_unique(items, "data", "Data")
+        for role in OCIO_TEXTURE_ROLE_ORDER:
+            name = _ocio_role_color_space(config, role)
+            if name:
+                _append_unique(items, name, "%s (role: %s)" % (name, role))
+        keywords = ("texture", "input", "utility", "log", "data", "scene", "linear")
+
+    for color_space in _ocio_color_spaces(config):
+        name = _ocio_color_space_name(color_space)
+        if not name:
+            continue
+        haystack = " ".join(
+            [name, _ocio_family(color_space)] + _ocio_categories(color_space)
+        ).lower()
+        if any(keyword in haystack for keyword in keywords):
+            _append_unique(items, name)
+
+    return items
+
+
+def ocio_render_space_menu():
+    flat = []
+    for token, label in _ocio_menu_items("render"):
+        flat.extend([token, label])
+    return flat
+
+
+def ocio_texture_source_menu():
+    flat = []
+    for token, label in _ocio_menu_items("texture"):
+        flat.extend([token, label])
+    return flat
+
+
+def _dialog_menu_quote(value):
+    return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def ocio_texture_source_dialog_menu():
+    return " ".join(
+        _dialog_menu_quote(item)
+        for pair in _ocio_menu_items("texture")
+        for item in pair
+    )
+
+
+def _ocio_string_menu(name, label, default, help_text, menu_kind):
+    parm = hou.StringParmTemplate(
+        name,
+        label,
+        1,
+        (default,),
+        string_type=hou.stringParmType.Regular,
+        menu_items=tuple(token for token, _ in _ocio_menu_items(menu_kind)),
+        menu_labels=tuple(text for _, text in _ocio_menu_items(menu_kind)),
+        help=help_text,
+    )
+    parm.setItemGeneratorScript(
+        "import moonray_render_settings\n"
+        "return moonray_render_settings.%s()"
+        % ("ocio_render_space_menu" if menu_kind == "render" else "ocio_texture_source_menu")
+    )
+    parm.setItemGeneratorScriptLanguage(hou.scriptLanguage.Python)
+    parm.setMenuType(hou.menuType.Normal)
+    return parm
+
+
 def _scene_int(name, label, default, min_value=0, max_value=128, help_text=None):
     return hou.IntParmTemplate(
         "sceneVariable_" + name,
@@ -814,6 +990,40 @@ def _build_parm_template_group():
             "Offline husk/USD renders use this RenderSettings resolution. Viewport/IPR resolution is driven by the viewport.",
         )
     )
+
+    color_management = (
+        _label(
+            "ocio_policy_note",
+            "OCIO Policy",
+            "MoonRay uses the render process OCIO environment. Texture source spaces use native ImageMap/UsdUVTexture controls; final EXRs remain scene-linear in the selected rendering space.",
+        ),
+        _ocio_string_menu(
+            "renderingColorSpace",
+            "Rendering Color Space",
+            DEFAULT_RENDERING_COLOR_SPACE,
+            "Optional USD RenderSettings.renderingColorSpace. Leave blank to let hdMoonray resolve the active OCIO config roles in priority order: rendering, scene_linear, default_float, reference, then default as a warning fallback. Explicit names must resolve as a color-space name, role, or alias in the active OCIO config.",
+            "render",
+        ),
+        _label(
+            "texture_color_policy_note",
+            "Texture Source Policy",
+            "Native ImageMap source_color_space defaults to auto for OCIO file rules. UsdUVTexture preserves USD sourceColorSpace raw/sRGB/auto, with an optional source_color_space override. Use raw/data for utility maps.",
+        ),
+        _label(
+            "display_transform_note",
+            "Display Transform",
+            "MoonRay does not bake display/view transforms into the raster output in this pass. Apply Houdini/Nuke display views downstream.",
+        ),
+    )
+    ptg.append(
+        hou.FolderParmTemplate(
+            "color_management_folder",
+            "Color Management",
+            color_management,
+            folder_type=hou.folderType.Collapsible,
+        )
+    )
+
     update_rop = hou.ButtonParmTemplate(
         "create_update_usd_render_rop",
         "Create / Update USD Render ROP",

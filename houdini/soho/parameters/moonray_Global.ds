@@ -377,7 +377,7 @@
             name    "xn__sceneVariablescene_scale_dgb"
             label   "Scene Scale"
             type    float
-            default { "0.01" }
+            default { "1" }
             help    "(in meters): one unit in world space = 'scene scale' meters"
             disablewhen "{ xn__sceneVariablescene_scale_control_etb == block } { xn__sceneVariablescene_scale_control_etb == none }"
             range   { 0 10 }

@@ -27207,6 +27207,27 @@
                     "2"
                 ]
             },
+            "source_color_space": {
+                "moonray_name": "source_color_space",
+                "moonray_type": "String",
+                "default_value": [
+                    "auto"
+                ],
+                "houdini_name": "source_color_space",
+                "houdini_label": "Source Color Space",
+                "order": 9,
+                "help": "OCIO source color space for the texture. Use auto to apply active OCIO file rules, raw or data for utility maps, or an explicit color-space name from the active OCIO config. When OCIO conversion is active, legacy gamma is bypassed.",
+                "menu": [
+                    "auto",
+                    "raw",
+                    "data"
+                ],
+                "menu_values": [
+                    "auto",
+                    "raw",
+                    "data"
+                ]
+            },
             "offset": {
                 "moonray_name": "offset",
                 "moonray_type": "Vec2f",
@@ -27216,7 +27237,7 @@
                 ],
                 "houdini_name": "offset",
                 "houdini_label": "Offset",
-                "order": 9,
+                "order": 10,
                 "bindable": true,
                 "help": "A constant offset applied to the texture coordinates."
             },
@@ -27229,7 +27250,7 @@
                 ],
                 "houdini_name": "scale",
                 "houdini_label": "Scale",
-                "order": 10,
+                "order": 11,
                 "bindable": true,
                 "help": "A constant scale applied to the texture coordinates."
             },
@@ -27241,7 +27262,7 @@
                 ],
                 "houdini_name": "rotation_angle",
                 "houdini_label": "Rotation Angle",
-                "order": 11,
+                "order": 12,
                 "aliases": [
                     "rotation angle"
                 ],
@@ -27256,7 +27277,7 @@
                 ],
                 "houdini_name": "rotation_center",
                 "houdini_label": "Rotation Center",
-                "order": 12,
+                "order": 13,
                 "aliases": [
                     "rotation center"
                 ],
@@ -27270,7 +27291,7 @@
                 ],
                 "houdini_name": "saturation_enabled",
                 "houdini_label": "Saturation Enabled",
-                "order": 13,
+                "order": 14,
                 "aliases": [
                     "saturation enabled"
                 ],
@@ -27286,7 +27307,7 @@
                 ],
                 "houdini_name": "saturation",
                 "houdini_label": "Saturation",
-                "order": 14,
+                "order": 15,
                 "help": "Applies saturation per channel with 0.0 being grayscale and 1.0 being full saturation"
             },
             "contrast_enabled": {
@@ -27297,7 +27318,7 @@
                 ],
                 "houdini_name": "contrast_enabled",
                 "houdini_label": "Contrast Enabled",
-                "order": 15,
+                "order": 16,
                 "aliases": [
                     "contrast enabled"
                 ],
@@ -27313,7 +27334,7 @@
                 ],
                 "houdini_name": "contrast",
                 "houdini_label": "Contrast",
-                "order": 16,
+                "order": 17,
                 "help": "Applies contrast per channel in the style of Nuke where the pivot is at 0.18"
             },
             "gamma_enabled": {
@@ -27324,7 +27345,7 @@
                 ],
                 "houdini_name": "gamma_enabled",
                 "houdini_label": "Gamma Enabled",
-                "order": 17,
+                "order": 18,
                 "aliases": [
                     "gamma enabled"
                 ],
@@ -27340,7 +27361,7 @@
                 ],
                 "houdini_name": "gamma_adjust",
                 "houdini_label": "Gamma Adjust",
-                "order": 18,
+                "order": 19,
                 "aliases": [
                     "gamma adjust"
                 ],
@@ -27354,7 +27375,7 @@
                 ],
                 "houdini_name": "gain_offset_enabled",
                 "houdini_label": "Gain Offset Enabled",
-                "order": 19,
+                "order": 20,
                 "aliases": [
                     "gain offset enabled"
                 ],
@@ -27370,7 +27391,7 @@
                 ],
                 "houdini_name": "gain",
                 "houdini_label": "Gain",
-                "order": 20,
+                "order": 21,
                 "help": "Applies multiplier per channel."
             },
             "offset_adjust": {
@@ -27383,7 +27404,7 @@
                 ],
                 "houdini_name": "offset_adjust",
                 "houdini_label": "Offset Adjust",
-                "order": 21,
+                "order": 22,
                 "aliases": [
                     "offset adjust"
                 ],
@@ -27397,7 +27418,7 @@
                 ],
                 "houdini_name": "TMI_control_enabled",
                 "houdini_label": "TMI Control Enabled",
-                "order": 22,
+                "order": 23,
                 "aliases": [
                     "TME control enabled",
                     "TMI control enabled"
@@ -27414,7 +27435,7 @@
                 ],
                 "houdini_name": "TMI",
                 "houdini_label": "TMI",
-                "order": 23,
+                "order": 24,
                 "aliases": [
                     "TME"
                 ],

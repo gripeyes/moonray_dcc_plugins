@@ -813,7 +813,7 @@ This table is a summarized inventory of the parameters relevant to the MoonRay R
 | SceneVariables.json | `enable_dof` | Enable DOF | Bool | `true` | toggle | Global DOF enable. | SceneVariables | RenderSettings prim | exposed/RDLA-proven | expose main UI | Global Toggles | Camera focus/aperture remain camera prim settings. |
 | SceneVariables.json | `enable_displacement`, `enable_subsurface_scattering`, `enable_shadowing`, `enable_presence_shadows`, `lights_visible_in_camera`, `propagate_visibility_bounce_type`, `shadow_terminator_fix` | Global toggles | Bool/enum | metadata defaults | metadata enum | Global production toggles. | SceneVariables | RenderSettings prim | exposed | expose main UI | Global Toggles | Keep curated; do not include all debug/internal toggles. |
 | SceneVariables.json | `image_width`, `image_height` | Image dimensions | Int | `1920`, `1080` | n/a | Image dimensions. | SceneVariables | do not author here | not exposed | do not include in this LOP | n/a | Excluded by `RenderSettings.cc`; use USD RenderSettings resolution. |
-| SceneVariables.json | `scene_scale` | Scene Scale | Float | `0.01` | n/a | World unit scale. | SceneVariables | do not author here | not exposed | document only | n/a | Unit-policy work deferred. |
+| SceneVariables.json | `scene_scale` | Scene Scale | Float | `1.0` | n/a | World unit scale: one world unit equals `scene_scale` meters. | SceneVariables | do not author here by default | not exposed | document only | n/a | Default moved to `1.0`; hdMoonRay automatically bridges USD `metersPerUnit` to `SceneVariables.scene_scale`, while explicit `moonray:sceneVariable:scene_scale` opinions still win. |
 | SceneVariables.json | `enable_motion_blur`, `motion_steps`, `fps`, `slerp_xforms` | Motion blur settings | Bool/Float/Vector | metadata defaults | n/a | Motion sampling. | SceneVariables | unknown/special-case | hidden | hide/defer | n/a | `enable_motion_blur` and `motion_steps` are special-cased/excluded in hdMoonRay. |
 | SceneVariables.json | checkpoint/resume/deep settings | Checkpoint/deep output | mixed | metadata defaults | mixed | Output/deep/checkpoint internals. | SceneVariables | RenderSettings prim or output workflow | hidden | hide/defer | n/a | Needs separate render execution/deep/checkpoint pass. |
 | SceneVariables.json | `output_file`, `primary_aov` | MoonRay native output linkage | String/SceneObject* | metadata defaults | n/a | Native MoonRay output path/AOV linkage. | RenderOutput/SceneVariables | do not author here | hidden | do not include in this LOP | n/a | Use USD RenderProduct.productName and RenderVars. |
@@ -859,7 +859,7 @@ Current exposed/custom-authored settings after discovery:
 | Parameter/group | Reason | Correct authoring location | Future work |
 |-----------------|--------|----------------------------|-------------|
 | `image_width`, `image_height` | Excluded in hdMoonRay `RenderSettings.cc`; dimensions are driven by USD RenderSettings/Hydra framing. | `RenderSettings.resolution`, not `moonray:sceneVariable:*` | none for this LOP |
-| `scene_scale` | Unit policy is not settled; broad risk to lights, SSS, camera, materials. | renderer/unit-policy task | dedicated units pass |
+| `scene_scale` | Not exposed in the Render Settings LOP UI. The renderer now derives it from USD stage `metersPerUnit` unless explicitly authored as `moonray:sceneVariable:scene_scale`; raw light/material/camera/geometry distances remain unscaled. | renderer/unit-policy bridge | GUI/IPR parity check only |
 | `motion_steps`, `enable_motion_blur`, `fps`, `slerp_xforms` | hdMoonRay has special handling/exclusions; motion blur path not validated for this UI. | future motion blur/settings pass | audit and implement separately |
 | Checkpoint/resume settings | Execution/output behavior, not first-pass RenderSettings authoring. | future ROP/execution workflow | checkpoint pass |
 | Deep output settings | Deep output is AOV/output-system work. | future AOV/deep pass | defer |
@@ -1306,3 +1306,35 @@ pass.
 - The DCC layer does not own H20.5 husk's extra memory metadata emission.
 - The DCC layer does not own GUI-only Qt/OpenGL warning noise unless a later
   fresh Houdini session proves a MoonRay-specific trigger.
+
+## 2026-06 ARRI OCIO Controls
+
+The MoonRay Render Settings LOP now exposes a minimal Color Management folder.
+The folder does not bake display/view transforms and does not change AOV,
+RenderProduct, scene-scale, or displacement behavior.
+
+Current DCC color controls:
+
+| Control | Authored USD / behavior | Notes |
+| --- | --- | --- |
+| `renderingColorSpace` | Authors `UsdRender.Settings.renderingColorSpace` only when non-empty and not `auto`. | Blank/`auto` clears stale authored values and lets hdMoonray resolve the active OCIO config roles. With the ARRI CG config, default role resolution is `Linear ARRI Wide Gamut 4`. |
+| OCIO policy note | UI help only. | The render process uses `$OCIO`; standalone tools should be launched through the Houdini package environment or `setupHoudini.sh`. |
+| Texture source policy note | UI help only. | Native `ImageMap.source_color_space` and `UsdUVTexture.sourceColorSpace` / `source_color_space` own texture source interpretation. |
+| Display transform note | UI help only. | EXR output remains scene-linear/render-space; no display/view transform is baked by this pass. |
+
+The native Houdini `moonray_ImageMap.ds` and `moonray_nodes.json` now expose
+`source_color_space` with practical ARRI/H20.5 menu entries:
+
+- `auto`;
+- `raw`;
+- `data`;
+- `Linear ARRI Wide Gamut 4`;
+- `ARRI LogC4`;
+- `ACEScg`;
+- `Linear Rec.709 (sRGB)`;
+- `Gamma 2.4 Rec.709 - Texture`.
+
+There is no separate source `moonray_UsdUVTexture.ds` in this plugin tree. The
+native `UsdUVTexture` scene-class metadata does expose `sourceColorSpace` and
+the optional `source_color_space` override for translated USD and direct RDL
+use.

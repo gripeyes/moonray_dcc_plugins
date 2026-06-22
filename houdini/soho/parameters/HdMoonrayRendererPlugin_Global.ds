@@ -445,7 +445,7 @@
             name    "xn__moonraysceneVariablescene_scale_lrbn"
             label   "Scene Scale"
             type    float
-            default { "0.01" }
+            default { "1" }
             help    "(in meters): one unit in world space = 'scene scale' meters"
             disablewhen "{ xn__moonraysceneVariablescene_scale_control_m4bn == block } { xn__moonraysceneVariablescene_scale_control_m4bn == none }"
             range   { 0 10 }
