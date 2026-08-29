@@ -9,7 +9,6 @@ MOONRAY_TAB_MASK = (
     "subnetconnector suboutput subinput genericshader"
 )
 
-
 def _set_if_present(node, parms):
     existing = {parm.name() for parm in node.parms()}
     node.setParms({name: value for name, value in parms.items() if name in existing})

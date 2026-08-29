@@ -737,8 +737,6 @@ def _ocio_menu_items(kind):
         keywords = ("render", "scene", "working", "linear")
     else:
         _append_unique(items, "auto", "Auto (OCIO file rules)")
-        _append_unique(items, "raw", "Raw")
-        _append_unique(items, "data", "Data")
         for role in OCIO_TEXTURE_ROLE_ORDER:
             name = _ocio_role_color_space(config, role)
             if name:
@@ -1007,7 +1005,7 @@ def _build_parm_template_group():
         _label(
             "texture_color_policy_note",
             "Texture Source Policy",
-            "Native ImageMap source_color_space defaults to auto for OCIO file rules. UsdUVTexture preserves USD sourceColorSpace raw/sRGB/auto, with an optional source_color_space override. Use raw/data for utility maps.",
+            "Native ImageMap source_color_space defaults to auto for OCIO file rules. UsdUVTexture preserves authored USD sourceColorSpace, with an optional source_color_space override. Utility/data choices come from the active OCIO config or file rules.",
         ),
         _label(
             "display_transform_note",
