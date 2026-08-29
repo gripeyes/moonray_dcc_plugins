@@ -680,7 +680,7 @@ class MoonrayParm(object):
             return "vector"
         if self.moonray_type in [VEC3F, VEC3D, VEC2F, RGB, MR_TYPE_NORMALMAP]:
             return "vector"
-        if self.moonray_type in [VEC4F]:
+        if self.moonray_type in [VEC4F, RGBA]:
             return "vector4"
         elif self.moonray_type in [FLOAT, DOUBLE]:
             return "float"
@@ -688,6 +688,8 @@ class MoonrayParm(object):
             return "int"
         elif self.moonray_type in [STRING, SCENEOBJECT]:
             return "string"
+        elif self.moonray_type == MAT3F:
+            return "matrix3"
         elif self.moonray_type in [MAT4F, MAT4D]:
             return "matrix"
         return None
@@ -789,12 +791,15 @@ class MoonrayParm(object):
                 return self._multiparm_template(pt)
             return pt
 
-        elif moonray_type in [VEC2F, VEC3F, VEC3D, MAT4D]:
+        elif moonray_type in [VEC2F, VEC3F, VEC3D, VEC4F, MAT3F, MAT4F, MAT4D]:
+            default_value = self.default_value
+            if moonray_type in [MAT3F, MAT4F, MAT4D] and default_value and isinstance(default_value[0], list):
+                default_value = [component for row in default_value for component in row]
             return hou.FloatParmTemplate(
                 name,
                 self.houdini_label,
-                len(self.default_value),
-                default_value=self.default_value,
+                len(default_value),
+                default_value=default_value,
                 help=self.help,
                 disable_when=self.disable_when,
                 tags=DEFAULT_MOONRAY_PARM_TAGS,
@@ -810,8 +815,8 @@ class MoonrayParm(object):
                 tags=DEFAULT_MOONRAY_PARM_TAGS,
             )
 
-        elif moonray_type in [RGB, RGBVECTOR]:
-            if moonray_type == RGBVECTOR and self.default_value and isinstance(self.default_value[0], list):
+        elif moonray_type in [RGB, RGBA, RGBVECTOR, RGBAVECTOR]:
+            if moonray_type in [RGBVECTOR, RGBAVECTOR] and self.default_value and isinstance(self.default_value[0], list):
                 def_value = self.default_value[0]
             else:
                 def_value = self.default_value
@@ -824,7 +829,7 @@ class MoonrayParm(object):
             pt = hou.FloatParmTemplate(
                 name,
                 self.houdini_label,
-                3,
+                4 if moonray_type in [RGBA, RGBAVECTOR] else 3,
                 default_value=def_value,
                 look=parm_look,
                 naming_scheme=naming_scheme,
@@ -916,9 +921,9 @@ class MoonrayClass(object):
         self.parms = []
         self.parms_dict = {}
         self.moonray_name = name
-        self.versionless_moonray_name = re.sub(r'_v[0-9]*$', '', name)
-        x = name.rfind('_v')
-        self.version = int(name[x + 2:]) if x >= 0 else 1
+        version_match = re.search(r'_v([0-9]+)$', name)
+        self.versionless_moonray_name = name[:version_match.start()] if version_match else name
+        self.version = int(version_match.group(1)) if version_match else 1
         self.moonray_type = mr_type
         self.folders_with_parms = {}
         self.folders_sorted = []
@@ -1128,10 +1133,21 @@ class MoonrayClass(object):
 
     def get_output_tag(self):
         shader = Sdr.Registry().GetShaderNodeByName(self.moonray_name)
-        if shader and shader.GetOutputNames():
-            outputname = shader.GetOutputNames()[0]
+        if shader:
+            if hasattr(shader, 'GetShaderOutputNames'):
+                output_names = shader.GetShaderOutputNames()
+            else:
+                output_names = shader.GetOutputNames()
+        else:
+            output_names = []
+        if output_names:
+            outputname = output_names[0]
             output = shader.GetShaderOutput(outputname)
-            outputtype = str(output.GetTypeAsSdfType()[0])
+            sdf_type = output.GetTypeAsSdfType()
+            if hasattr(sdf_type, 'GetSdfType'):
+                outputtype = str(sdf_type.GetSdfType())
+            else:
+                outputtype = str(sdf_type[0])
         elif self.moonray_type in HDAVopBuilder.OUTPUT_TAG_TYPE:
             outputname, outputtype = HDAVopBuilder.OUTPUT_TAG_TYPE[self.moonray_type]
         else:
