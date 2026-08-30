@@ -15,23 +15,6 @@ def _set_if_present(node, parms):
     node.setParms({name: value for name, value in parms.items() if name in existing})
 
 
-def _create_output_connector(subnet_node, name, label, parm_type, color, input_node):
-    connector = subnet_node.createNode("subnetconnector", "{}_output".format(name))
-    _set_if_present(
-        connector,
-        {
-            "parmname": name,
-            "parmlabel": label,
-            "parmtype": parm_type,
-            "connectorkind": 1,
-            "useasparmdefiner": 0,
-        },
-    )
-    connector.setColor(hou.Color(color))
-    connector.setInput(0, input_node, 0)
-    return connector
-
-
 def setup_moonray_material_builder(subnet_node):
     """Configure a plain VOP subnet as a MoonRay-native material builder."""
     subnet_node.setShaderLanguageName("VEX")
@@ -40,8 +23,8 @@ def setup_moonray_material_builder(subnet_node):
     )
 
     suboutput = subnet_node.node("suboutput1")
-    if suboutput is not None:
-        suboutput.destroy()
+    if suboutput is None:
+        suboutput = subnet_node.createNode("suboutput", "suboutput1")
     subinput = subnet_node.node("subinput1")
     if subinput is not None:
         subinput.setName("inputs", unique_name=True)
@@ -51,12 +34,14 @@ def setup_moonray_material_builder(subnet_node):
         "Vop::DW_MOONRAY::NormalDisplacement::1", "normal_displacement"
     )
     _set_if_present(displacement, {"height": 0.0, "height_multiplier": 0.0})
-    _create_output_connector(
-        subnet_node, "surface", "Surface", 24, (0.89, 0.69, 0.6), surface
+    # Houdini 22's suboutput node owns subnet outputs.  Connecting directly to
+    # subnetconnector nodes makes them input connectors and causes type errors.
+    _set_if_present(
+        suboutput,
+        {"name1": "surface", "label1": "Surface", "name2": "displacement", "label2": "Displacement"},
     )
-    _create_output_connector(
-        subnet_node, "displacement", "Displacement", 25, (0.6, 0.69, 0.89), displacement
-    )
+    suboutput.setInput(0, surface, 0)
+    suboutput.setInput(1, displacement, 0)
     subnet_node.setMaterialFlag(True)
     subnet_node.layoutChildren()
     return subnet_node
