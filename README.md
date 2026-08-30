@@ -17,6 +17,29 @@ It is also possible to copy the plugin to your `~/Houdini20.0/` directory, or an
 
 > see https://www.sidefx.com/docs/houdini/basics/config.html
 
+## Houdini 22 tools
+
+The H22 installation includes a MoonRay Material Builder shelf tool. Use it in
+a Solaris Material Library to create an editable native network containing
+`DwaBaseMaterial` and `NormalDisplacement`, with `surface` and `displacement`
+outputs suitable for MoonRay.
+
+MoonRay Light Filter HDAs are intended for a Solaris Light Filter Library. The
+available filters include Intensity, Decay, Cookie, Barn Door, Color Ramp,
+Combine, Rod, and VDB filters.
+
+MoonRay mesh tessellation controls are available in the Render Geometry
+parameters. Choose **Set or Create** for the `mesh_resolution` or
+`adaptive_error` primvar control before changing its value; **Do Nothing** is
+the default so existing scene-authored values are not overwritten.
+
+Native MoonRay SpotLight controls are generated in a top-level **Native
+SpotLight** tab. The toggle sits above **SpotLight** and **Falloff** section
+headings, so every control remains inside the native override instead of
+appearing below every MoonRay parameter tab. The override is available on all
+supported USD light types (Cylinder, Disk, Distant, Dome, Geometry, Portal,
+Rect, and Sphere); enabling it switches the MoonRay class to `SpotLight`.
+
 
 ## Updating
 
@@ -50,5 +73,4 @@ hython scripts/update_hdas.py --output-dir ./houdini
 cp houdini/moonray_nodes.json <openmoonray_install_dir>/plugin/houdini
 cp -r houdini/{otls,soho,python*} <openmoonray_install_dir>/plugin/houdini
 ```
-
 
