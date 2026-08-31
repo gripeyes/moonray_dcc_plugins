@@ -33,6 +33,13 @@ parameters. Choose **Set or Create** for the `mesh_resolution` or
 `adaptive_error` primvar control before changing its value; **Do Nothing** is
 the default so existing scene-authored values are not overwritten.
 
+Native MoonRay SpotLight controls are generated in a top-level **Native
+SpotLight** tab. The toggle sits above **SpotLight** and **Falloff** section
+headings, so every control remains inside the native override instead of
+appearing below every MoonRay parameter tab. The override is available on all
+supported USD light types (Cylinder, Disk, Distant, Dome, Geometry, Portal,
+Rect, and Sphere); enabling it switches the MoonRay class to `SpotLight`.
+
 
 ## Updating
 
@@ -66,4 +73,3 @@ hython scripts/update_hdas.py --output-dir ./houdini
 cp houdini/moonray_nodes.json <openmoonray_install_dir>/plugin/houdini
 cp -r houdini/{otls,soho,python*} <openmoonray_install_dir>/plugin/houdini
 ```
-

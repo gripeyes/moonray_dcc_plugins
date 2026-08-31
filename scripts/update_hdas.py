@@ -2017,11 +2017,18 @@ class LopDialogScriptBuilder(object):
                                 parm_name_dict, skip_usd_attr,
                                 ft=hou.folderType.Tabs):
         for folder_name in moonray_class.folders_sorted:
-            if not group.findFolder(folder_name):
+            folder_name = self.__light_folder(folder_name, moonray_class)
+            if (moonray_class.moonray_name == 'SpotLight' and
+                    folder_name in ('SpotLight', 'Falloff')):
+                continue
+            folder_path = self.__light_folder_path(folder_name, moonray_class)
+            if not group.findFolder(folder_path):
                 folder = hou.FolderParmTemplate('folder', folder_name, folder_type=ft)
-                folder.setConditional(hou.parmCondType.HideWhen, folder_hidewhen_dict.get(folder_name))
+                hide_when = folder_hidewhen_dict.get(folder_name)
+                folder.setConditional(hou.parmCondType.HideWhen, hide_when)
                 group.append(folder)
-                group.hideFolder(folder_name, True)
+                folder_path = folder_name
+                group.hideFolder(folder_path, True)
 
         usd_attr_list = USD_ATTRIBUTE_MAP.get(moonray_class.moonray_name)
         for parm in moonray_class.parms:
@@ -2041,6 +2048,13 @@ class LopDialogScriptBuilder(object):
             pt = group.find(pt_name)
             if not pt:
                 hide_when = parm_hidewhen_dict.get(attr_name)
+                if (moonray_class.moonray_name == 'SpotLight' and
+                        parm.moonray_name in (
+                            'lens_radius', 'aspect_ratio',
+                            'focal_plane_distance', 'outer_cone_angle',
+                            'inner_cone_angle', 'angle_falloff_type',
+                            'black_level')):
+                    hide_when = self.__all_light_hidewhen()
                 control_pt = self.__create_control_parm(attr_name, attr_prefix, hide_when, parm.moonray_type)
                 if moonray_class.moonray_type == 'Camera':
                     pt = parm.houdini_parm_template(
@@ -2077,11 +2091,25 @@ class LopDialogScriptBuilder(object):
                 pt.setDisableWhen(disable_when)
                 if usdvaluetype:
                     pt.setTags({'usdvaluetype': usdvaluetype})
-                folder_name = moonray_class.folder_name_for_parameter(parm)
-                if folder_name and group.findFolder(folder_name):
-                    group.appendToFolder(folder_name, control_pt)
-                    group.appendToFolder(folder_name, pt)
-                    group.hideFolder(folder_name, False)
+                folder_name = self.__light_folder(
+                    moonray_class.folder_name_for_parameter(parm), moonray_class
+                )
+                folder_path = self.__light_folder_path(folder_name, moonray_class)
+                if (moonray_class.moonray_name == 'SpotLight' and
+                        folder_name in ('SpotLight', 'Falloff')):
+                    heading_name = 'native_spotlight_{}_heading'.format(
+                        folder_name.lower()
+                    )
+                    if not group.find(heading_name):
+                        heading = hou.LabelParmTemplate(
+                            heading_name, folder_name
+                        )
+                        heading.setLabelParmType(hou.labelParmType.Heading)
+                        group.appendToFolder('Native SpotLight', heading)
+                if folder_name and group.findFolder(folder_path):
+                    group.appendToFolder(folder_path, control_pt)
+                    group.appendToFolder(folder_path, pt)
+                    group.hideFolder(folder_path, False)
                 else:
                     group.append(control_pt)
                     group.append(pt)
@@ -2284,8 +2312,67 @@ class LopDialogScriptBuilder(object):
         with open(dest_file, 'w') as file_pointer:
             file_pointer.write(script)
 
+    @staticmethod
+    def __native_spotlight_toggle():
+        toggle = hou.ToggleParmTemplate(
+            'xn__moonraynative_spotlight_rqa',
+            'Enable Native MoonRay SpotLight',
+            False,
+        )
+        toggle.setHelp(
+            "Forces this Solaris light to render as MoonRay's native "
+            "SpotLight. Use this when you specifically want MoonRay "
+            "projector-style controls such as inner/outer cone angles, "
+            "lens radius, focal plane distance, aspect ratio, angle "
+            "falloff, and black level. The standard Solaris Shaping tab "
+            "remains the renderer-neutral USD ShapingAPI path."
+        )
+        toggle.setScriptCallback(
+            "node=kwargs['node']; enabled=bool(kwargs['parm'].eval()); "
+            "control=node.parm('xn__moonrayclass_control_o8a'); "
+            "klass=node.parm('xn__moonrayclass_nva'); "
+            "control.set('set' if enabled else 'none'); "
+            "klass.set('SpotLight') if enabled else None"
+        )
+        toggle.setScriptCallbackLanguage(hou.scriptLanguage.Python)
+        return toggle
+
+    @staticmethod
+    def __light_folder(folder_name, moonray_class):
+        if moonray_class.moonray_name == 'SpotLight' and folder_name == 'Cone':
+            return 'SpotLight'
+        return folder_name
+
+    @staticmethod
+    def __light_folder_path(folder_name, moonray_class):
+        if (moonray_class.moonray_name == 'SpotLight' and
+                folder_name in ('SpotLight', 'Falloff')):
+            return 'Native SpotLight'
+        return folder_name
+
+    @staticmethod
+    def __all_light_hidewhen():
+        lights = ('CylinderLight', 'DiskLight', 'DistantLight', 'DomeLight',
+                  'GeometryLight', 'PortalLight', 'RectLight', 'SphereLight')
+        return '{{ {} createprims == on }}'.format(
+            ' '.join('primtype != UsdLux' + light for light in lights)
+        )
+
+    def __native_spotlight_folder(self):
+        native = hou.FolderParmTemplate(
+            'native_spotlight', 'Native SpotLight',
+            folder_type=hou.folderType.Tabs,
+        )
+        native.setConditional(
+            hou.parmCondType.HideWhen, self.__all_light_hidewhen()
+        )
+        native.addParmTemplate(self.__native_spotlight_toggle())
+        return native
+
     def build_moonray_class(self, prefix, moonray_class):
         group = hou.ParmTemplateGroup()
+        if moonray_class.moonray_name == 'SpotLight':
+            group.append(self.__native_spotlight_folder())
         self.__build_parms_for_class(
             group,
             moonray_class,
@@ -2400,6 +2487,7 @@ class LopDialogScriptBuilder(object):
             if moonray_class.moonray_type == 'Light':
                 moonray_class_list.append(moonray_class)
         self.__add_light_type_parm(group)
+        group.append(self.__native_spotlight_folder())
         self.__build_parms_for_class_list(
             moonray_class_list,
             'moonray:',
