@@ -1410,15 +1410,15 @@ class HDABuilder(object):
 class HDAVopBuilder(HDABuilder):
 
     OUTPUT_CONNECTIONS = {
-        MR_TYPE_MATERIAL: "    output\tsurface\tsurface\tMaterial",
-        MR_TYPE_DWA_BASE: "    output\tsurface\tsurface\tDwaBase",
-        MR_TYPE_LAYERABLE: "    output\tsurface\tsurface\tDwaBaseLayerable",
-        MR_TYPE_HAIR_LAYERABLE: "    output\tsurface\tsurface\tDwaBaseHairLayerable",
-        MR_TYPE_NORMALMAP: "    output\tvector4\tnormalmap\tNormalMap",
-        MR_TYPE_MAP: "    output\tvector\tmap\tMap",
-        MR_TYPE_DISPLACEMENT: "    output\tdisplacement\tdisplacement\tDisplacement",
-        MR_TYPE_VOLUME: "    output\tvolume\tvolume\tVolume",
-        MR_TYPE_DISPLAY_FILTER: "    output\tstruct_FuzzySet\tdisplayfilter\tDisplayFilter",
+        MR_TYPE_MATERIAL: "    output\tsurface\tout\t\"out\"",
+        MR_TYPE_DWA_BASE: "    output\tsurface\tout\t\"out\"",
+        MR_TYPE_LAYERABLE: "    output\tsurface\tout\t\"out\"",
+        MR_TYPE_HAIR_LAYERABLE: "    output\tsurface\tout\t\"out\"",
+        MR_TYPE_NORMALMAP: "    output\tvector4\tout\t\"out\"",
+        MR_TYPE_MAP: "    output\tvector\tout\t\"out\"",
+        MR_TYPE_DISPLACEMENT: "    output\tdisplacement\tout\t\"out\"",
+        MR_TYPE_VOLUME: "    output\tvolume\tout\t\"out\"",
+        MR_TYPE_DISPLAY_FILTER: "    output\tstruct_FuzzySet\tout\t\"out\"",
     }
 
     OUTPUT_TAG_TYPE = {
