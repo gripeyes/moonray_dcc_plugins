@@ -494,7 +494,7 @@
         label   "Gamma"
         type    string
         default { "auto" }
-        help    "If this is set to 'on' or 'auto' and the 'texture' file is 8-bit, then a power of 2.2 will be applied to the RGB channels of the image."
+        help    "Deprecated compatibility fallback. Applied only when OCIO cannot resolve a color conversion for this texture."
         disablewhen "{ xn__inputsgamma_control_06a == block } { xn__inputsgamma_control_06a == none }"
         menu {
             "off"   "Off"
@@ -502,6 +502,33 @@
             "auto"  "Auto"
         }
         parmtag { "usdvaluetype" "token" }
+    }
+    parm {
+        name    "xn__inputssource_color_space_control_6sb"
+        label   "inputs:source_color_space"
+        type    string
+        default { "none" }
+        menujoin {
+            "set"           "![BUTTONS_set_or_create]Set or Create"
+            "setexisting"   "![BUTTONS_set_if_exists]Set if Exists"
+            "block"         "![BUTTONS_set_block]Block"
+            "none"          "![BUTTONS_set_nothing]Do Nothing"
+        }
+        parmtag { "sidefx::look" "icon" }
+    }
+    parm {
+        name    "xn__inputssource_color_space_5fb"
+        label   "Source Color Space"
+        type    string
+        default { "auto" }
+        help    "OCIO source color space for the texture. Use 'auto' to apply the active OCIO file rules, raw/data/none for utility data, or an explicit color-space name, role, or alias."
+        disablewhen "{ xn__inputssource_color_space_control_6sb == block } { xn__inputssource_color_space_control_6sb == none }"
+        menureplace {
+            [ "import moonray_ocio" ]
+            [ "return moonray_ocio.source_color_space_menu()" ]
+            language python
+        }
+        parmtag { "usdvaluetype" "string" }
     }
     parm {
         name    "xn__inputsoffset_control_n8a"

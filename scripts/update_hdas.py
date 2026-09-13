@@ -860,6 +860,11 @@ class MoonrayParm(object):
                 is_hidden=self.fake_bind,
                 tags=DEFAULT_MOONRAY_PARM_TAGS,
             )
+            if self.moonray_name == "source_color_space":
+                pt.setMenuType(hou.menuType.StringReplace)
+                pt.setItemGeneratorScript(
+                    "import moonray_ocio\nreturn moonray_ocio.source_color_space_menu()")
+                pt.setItemGeneratorScriptLanguage(hou.scriptLanguage.Python)
             if self.is_multiparm and not skip_multiparm:
                 return self._multiparm_template(pt)
             return pt
