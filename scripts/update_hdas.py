@@ -1232,6 +1232,14 @@ class MoonrayClass(object):
 
 class HDABuilder(object):
 
+    # createDigitalAsset() can only turn network nodes into new assets.  Using
+    # a VOP subnet here produces a subnet HDA whose internal suboutput owns the
+    # public connectors, so the external-shader output declarations below are
+    # ignored.  DelayedReadArchive is a leaf VOP definition shipped by Houdini;
+    # copying its definition gives generated MoonRay shaders the correct leaf
+    # operator shape before their dialog script and parameters are replaced.
+    VOP_DEFINITION_TEMPLATE = 'DelayedReadArchive'
+
     _houdini_create_bindings = {
         MR_TYPE_DISPLACEMENT: ("/mat", "subnet"),
         MR_TYPE_DISPLAY_FILTER: ("/mat", "subnet"),
@@ -1319,6 +1327,48 @@ class HDABuilder(object):
         ensure_directory(directory)
         file_path = os.path.join(directory, moonray_class.houdini_name + '.hda')
         label = 'Moonray {0}'.format(moonray_class.versionless_moonray_name)
+
+        if moonray_class.houdini_context == 'Vop':
+            template_type = hou.vopNodeTypeCategory().nodeType(
+                cls.VOP_DEFINITION_TEMPLATE)
+            template = template_type.definition() if template_type else None
+            if template is None:
+                raise MoonrayBuildError(
+                    "Houdini leaf VOP template '{}' is unavailable.".format(
+                        cls.VOP_DEFINITION_TEMPLATE))
+
+            if os.path.isfile(file_path):
+                try:
+                    hou.hda.uninstallFile(file_path)
+                except hou.OperationFailed:
+                    pass
+                os.remove(file_path)
+
+            template.copyToHDAFile(
+                file_path, moonray_class.houdini_name, label)
+            hou.hda.installFile(file_path)
+            definitions = hou.hda.definitionsInFile(file_path)
+            hda = next(
+                (definition for definition in definitions
+                 if definition.nodeTypeName() == moonray_class.houdini_name),
+                None,
+            )
+            if hda is None:
+                raise MoonrayBuildError(
+                    "Failed to create leaf VOP HDA for '{}'.".format(
+                        moonray_class.moonray_name))
+            hda.setIsPreferred(True)
+            # Do not inherit parameters or help text from the Houdini template.
+            # The MoonRay builder supplies the complete public dialog below.
+            header = HDAVopBuilder(hda, moonray_class)._generate_header()
+            hda.sections()['DialogScript'].setContents(
+                '\n'.join(header + ['', '}']))
+            moonray_class.hda = hda
+            hda.setIcon(moonray_class.icon_name)
+            moonray_class.set_tab_menu()
+            moonray_class.add_parms_to_hda()
+            return hda
+
         parent_path, base = cls._houdini_create_bindings[moonray_class.moonray_type]
         parent_node = hou.node(parent_path)
         if parent_node is None:
@@ -1415,15 +1465,15 @@ class HDABuilder(object):
 class HDAVopBuilder(HDABuilder):
 
     OUTPUT_CONNECTIONS = {
-        MR_TYPE_MATERIAL: "    output\tsurface\tout\t\"out\"",
-        MR_TYPE_DWA_BASE: "    output\tsurface\tout\t\"out\"",
-        MR_TYPE_LAYERABLE: "    output\tsurface\tout\t\"out\"",
-        MR_TYPE_HAIR_LAYERABLE: "    output\tsurface\tout\t\"out\"",
-        MR_TYPE_NORMALMAP: "    output\tvector4\tout\t\"out\"",
-        MR_TYPE_MAP: "    output\tvector\tout\t\"out\"",
-        MR_TYPE_DISPLACEMENT: "    output\tdisplacement\tout\t\"out\"",
-        MR_TYPE_VOLUME: "    output\tvolume\tout\t\"out\"",
-        MR_TYPE_DISPLAY_FILTER: "    output\tstruct_FuzzySet\tout\t\"out\"",
+        MR_TYPE_MATERIAL: "    output\tsurface\tsurface\tMaterial",
+        MR_TYPE_DWA_BASE: "    output\tsurface\tsurface\tDwaBase",
+        MR_TYPE_LAYERABLE: "    output\tsurface\tsurface\tDwaBaseLayerable",
+        MR_TYPE_HAIR_LAYERABLE: "    output\tsurface\tsurface\tDwaBaseHairLayerable",
+        MR_TYPE_NORMALMAP: "    output\tvector4\tnormalmap\tNormalMap",
+        MR_TYPE_MAP: "    output\tvector\tmap\tMap",
+        MR_TYPE_DISPLACEMENT: "    output\tdisplacement\tdisplacement\tDisplacement",
+        MR_TYPE_VOLUME: "    output\tvolume\tvolume\tVolume",
+        MR_TYPE_DISPLAY_FILTER: "    output\tstruct_FuzzySet\tdisplayfilter\tDisplayFilter",
     }
 
     OUTPUT_TAG_TYPE = {
