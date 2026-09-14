@@ -34,8 +34,8 @@ def setup_moonray_material_builder(subnet_node):
         "Vop::DW_MOONRAY::NormalDisplacement::1", "normal_displacement"
     )
     _set_if_present(displacement, {"height": 0.0, "height_multiplier": 0.0})
-    # Houdini 22's suboutput node owns subnet outputs.  Connecting directly to
-    # subnetconnector nodes makes them input connectors and causes type errors.
+    # Match Houdini 22's compact Karma Material Builder topology. Separate
+    # subnetconnector outputs are also valid but do not change USD semantics.
     _set_if_present(
         suboutput,
         {"name1": "surface", "label1": "Surface", "name2": "displacement", "label2": "Displacement"},
