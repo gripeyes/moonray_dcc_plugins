@@ -19,7 +19,10 @@ HOUDINI_OUTPUT_TYPES = {
 
 
 def _output_declaration(definition):
-    dialog_script = definition.sections()["DialogScript"].contents()
+    dialog_section = definition.sections().get("DialogScript")
+    if dialog_section is None:
+        raise ValueError("missing DialogScript output declaration")
+    dialog_script = dialog_section.contents()
     output_lines = [
         shlex.split(line)
         for line in dialog_script.splitlines()
@@ -70,9 +73,8 @@ def _validate_imagemap_connection(material_network, failures):
         image.destroy()
 
 
-def _validate_material_builder(material_network, failures):
-    python_lib = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "houdini", "python3.13libs"))
+def _validate_material_builder(material_network, failures, houdini_dir):
+    python_lib = os.path.abspath(os.path.join(houdini_dir, "python3.13libs"))
     if python_lib not in sys.path:
         sys.path.insert(0, python_lib)
     import moonray_material_builder
@@ -110,7 +112,28 @@ def _validate_material_builder(material_network, failures):
         builder.destroy()
 
 
-def validate(output_dir):
+def _same_path(first, second):
+    return os.path.realpath(first) == os.path.realpath(second)
+
+
+def _active_definition(expected_definition, active_install_dir):
+    node_type = hou.nodeType(
+        hou.vopNodeTypeCategory(), expected_definition.nodeTypeName())
+    if node_type is None or node_type.definition() is None:
+        raise ValueError("node type is not installed")
+
+    definition = node_type.definition()
+    expected_path = os.path.join(
+        active_install_dir, "otls",
+        os.path.basename(expected_definition.libraryFilePath()))
+    if not _same_path(definition.libraryFilePath(), expected_path):
+        raise ValueError(
+            "active definition is {}, expected {}".format(
+                definition.libraryFilePath(), expected_path))
+    return definition
+
+
+def validate(output_dir, active_install_dir=None):
     failures = []
     material_network = hou.node("/mat")
     hda_paths = sorted(glob.glob(os.path.join(output_dir, "otls", "Vop::DW_MOONRAY*.hda")))
@@ -118,17 +141,48 @@ def validate(output_dir):
     for hda_path in hda_paths:
         shader_name = os.path.basename(hda_path)
 
-        hou.hda.installFile(hda_path)
-        definition = hou.hda.definitionsInFile(hda_path)[0]
-        definition.setIsPreferred(True)
+        expected_definition = hou.hda.definitionsInFile(hda_path)[0]
         try:
-            expected_name, expected_label, expected_type = _output_declaration(definition)
+            expected_name, expected_label, expected_type = _output_declaration(
+                expected_definition)
         except ValueError as error:
             failures.append("{}: {}".format(shader_name, error))
             continue
 
+        if active_install_dir:
+            try:
+                definition = _active_definition(
+                    expected_definition, active_install_dir)
+            except ValueError as error:
+                failures.append("{}: {}".format(shader_name, error))
+                continue
+        else:
+            hou.hda.installFile(hda_path)
+            definition = hou.hda.definitionsInFile(hda_path)[0]
+            definition.setIsPreferred(True)
+
+        if "Contents.gz" in definition.sections():
+            failures.append("{}: shader VOP contains a subnet Contents.gz".format(
+                shader_name))
+            continue
+        try:
+            installed_declaration = _output_declaration(definition)
+        except ValueError as error:
+            failures.append("{}: {}".format(shader_name, error))
+            continue
+        expected_declaration = (expected_name, expected_label, expected_type)
+        if installed_declaration != expected_declaration:
+            failures.append(
+                "{}: expected output declaration {}, got {}".format(
+                    shader_name, expected_declaration, installed_declaration))
+            continue
+
         node = material_network.createNode(definition.nodeTypeName())
         try:
+            if node.children():
+                failures.append(
+                    "{}: shader VOP contains {} child nodes".format(
+                        shader_name, len(node.children())))
             actual = (node.outputNames(), node.outputLabels(), node.outputDataTypes())
             expected = ((expected_name,), (expected_label,), (expected_type,))
             if actual != expected:
@@ -145,7 +199,8 @@ def validate(output_dir):
     if not validated:
         failures.append("No MoonRay VOP HDAs with output declarations were found")
     _validate_imagemap_connection(material_network, failures)
-    _validate_material_builder(material_network, failures)
+    houdini_dir = active_install_dir or output_dir
+    _validate_material_builder(material_network, failures, houdini_dir)
 
     if failures:
         raise RuntimeError("\n".join(failures))
@@ -159,8 +214,17 @@ def main():
     parser.add_argument(
         "output_dir", help="Generated Houdini output directory containing otls/"
     )
+    parser.add_argument(
+        "--active-install-dir",
+        help=("Require Houdini's active definitions to come from this installed "
+              "plugin/houdini directory; do not install or prefer output_dir HDAs"),
+    )
     args = parser.parse_args()
-    validate(os.path.abspath(args.output_dir))
+    validate(
+        os.path.abspath(args.output_dir),
+        (os.path.abspath(args.active_install_dir)
+         if args.active_install_dir else None),
+    )
 
 
 if __name__ == "__main__":
