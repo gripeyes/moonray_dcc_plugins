@@ -45485,7 +45485,7 @@
                 "moonray_name": "scene_scale",
                 "moonray_type": "Float",
                 "default_value": [
-                    0.01
+                    1.0
                 ],
                 "houdini_name": "scene_scale",
                 "houdini_label": "Scene Scale",
