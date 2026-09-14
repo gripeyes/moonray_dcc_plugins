@@ -73,3 +73,27 @@ hython scripts/update_hdas.py --output-dir ./houdini
 cp houdini/moonray_nodes.json <openmoonray_install_dir>/plugin/houdini
 cp -r houdini/{otls,soho,python*} <openmoonray_install_dir>/plugin/houdini
 ```
+
+4. Validate the generated artifacts in isolation:
+
+```
+HOUDINI_PACKAGE_SKIPLIST=moonray \
+    hython scripts/validate_vop_outputs.py houdini
+```
+
+Generated MoonRay shader VOPs must be leaf assets. Building them from a VOP
+subnet adds an internal `Contents.gz` network and prevents Houdini from exposing
+the external shader output declarations.
+
+After installing the plugin, validate the definitions Houdini actually loads:
+
+```
+hython scripts/validate_vop_outputs.py houdini \
+    --active-install-dir <openmoonray_install_dir>/plugin/houdini
+```
+
+The validator checks every shipped connector, an
+`ImageMap -> DwaBaseMaterial.albedo` connection, and the material builder's
+typed `surface` and `displacement` outputs. Run installed validation in a fresh
+Houdini process. An already-running session can retain the previously registered
+operator definition until Houdini is restarted.
